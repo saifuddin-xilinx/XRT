@@ -398,24 +398,6 @@ XBUtilities::can_proceed()
   return proceed;
 }
 
-#if 0
-size_t 
-XBUtilities::get_ddr_mem_size(const std::shared_ptr<xrt_core::device>& device) 
-{
-    std::string errmsg;
-    long long ddr_size = 0;
-    int ddr_bank_count = 0;
-
-    ddr_size = xrt_core::device_query<xrt_core::query::rom_ddr_bank_size_gb>(device);
-    ddr_bank_count = xrt_core::device_query<xrt_core::query::rom_ddr_bank_count_max>(device);
-
-    if (!ddr_size || !ddr_bank_count)
-        return 0;
-
-    return ddr_size*ddr_bank_count / (1024 * 1024);
-}
-#endif
-
 boost::property_tree::ptree
 XBUtilities::get_available_devices(bool inUserDomain) 
 {

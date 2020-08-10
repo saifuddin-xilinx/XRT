@@ -135,50 +135,29 @@ OO_MemRead::execute(const SubCmdOptions& _options) const
     return;
   }
 
-  std::cout << __FILE__ << " : " << __func__ << " : " << __LINE__ << std::endl; 
-  std::cout << "Device : " << m_device << std::endl;
-  std::cout << "Address : " << m_baseAddress << std::endl;
-  std::cout << "Size : " << m_sizeBytes << std::endl;
-  // -- process Input option -----------------------------------------------
-  unsigned long long baseAddress = std::stoll(m_baseAddress,0 ,0);;
-  unsigned long long sizeBytes = std::stoll(m_sizeBytes,0 ,0);
-  /*
-  std::stringstream SsAddr;
-  SsAddr << std::hex << m_baseAddress;
-  SsAddr >> baseAddress; 
-
-  //SsSize << std::hex << m_sizeBytes;
-  //SsSize >> sizeBytes;
-  */
-
-  std::cout << __FILE__ << " : " << __func__ << " : " << __LINE__ << " Address : " << baseAddress << std::endl; 
-  std::cout << __FILE__ << " : " << __func__ << " : " << __LINE__ << " Size : " << sizeBytes << std::endl; 
-  //if (!sizeBytes)
-  //   return;
-#if 0 
-  // Output file
-  if (!m_outputFile.empty() && boost::filesystem::exists(m_outputFile))
-      throw xrt_core::error((boost::format("Output file already exists: '%s'") % m_outputFile).str());
-#endif
-
-  std::cout << __FILE__ << " : " << __func__ << " : " << __LINE__ << std::endl; 
-  // -- process "device" option -----------------------------------------------
+  // -- process device option --------------------------------------------
   std::string deviceBDF;
-  std::cout << __FILE__ << " : " << __func__ << " : " << __LINE__ << " m_device : " << m_device << std::endl; 
   deviceBDF = boost::algorithm::to_lower_copy(m_device);
-  std::cout << __FILE__ << " : " << __func__ << " : " << __LINE__ << "  deviceBDF : " << deviceBDF << std::endl; 
   auto index = xrt_core::utils::bdf2index(deviceBDF, true /*_inUserDomain*/);         // Can throw
-  std::cout << __FILE__ << " : " << __func__ << " : " << __LINE__ << " : " << index << std::endl; 
-  
-  std::cout << __FILE__ << " : " << __func__ << " : " << __LINE__ << std::endl; 
+  if (index < 0)
+     return; // Invaid device index 
+
+  // -- process Input Address and Size -----------------------------------
+  unsigned long long baseAddress = std::stoll(m_baseAddress,0 ,0);;
+  unsigned long long sizeBytes = std::stoll(m_sizeBytes,0 ,0); 
+
+  // -- process Output File ----------------------------------------------
+  std::ofstream fOutput;
+  fOutput.open(m_outputFile, std::ios::out | std::ios::binary);
+  if (!fOutput.is_open())
+      throw xrt_core::error((boost::format("Unable to open the file '%s' for writing.") % m_outputFile).str());
+
+  // -- All Input validation Done Here -----------------------------------
   auto const dev = xrt_core::get_userpf_device(index); 
   auto const m_handle = dev->get_device_handle();
   std::vector<XBM::mem_bank_t> vec_banks;
   std::vector<XBM::mem_bank_t>::iterator startbank;
   int bankcnt = 0;
-
-  std::cout << __FILE__ << " : " << __func__ << " : " << __LINE__ << std::endl; 
-  std::cout << "DDR size : " << XBM::getDDRMemSize(dev) << std::endl; 
 
   //Sanity check the address and size against the mem topology
   if ((bankcnt = XBM::readWriteHelper(dev, baseAddress, sizeBytes, vec_banks, startbank)) == -EINVAL) {
@@ -194,12 +173,7 @@ OO_MemRead::execute(const SubCmdOptions& _options) const
       std::cout << "INFO: Reading from single bank, " << std::dec << sizeBytes << " bytes from DDR/HBM/PLRAM address 0x"  << std::hex << baseAddress
           << std::dec << std::endl;
   }
-  std::ofstream fOutput;
-  fOutput.open(m_outputFile, std::ios::out | std::ios::binary);
-  if (!fOutput.is_open())
-      throw xrt_core::error((boost::format("Unable to open the file '%s' for writing.") % m_outputFile).str());
-
-#if 1
+  
   size_t count = sizeBytes;
   for(auto it = startbank; it!=vec_banks.end(); ++it) {
       unsigned long long available_bank_size;
@@ -222,9 +196,10 @@ OO_MemRead::execute(const SubCmdOptions& _options) const
           break;
       }
   }
-#endif
 
   fOutput.close();
-  std::cout << "INFO: Read data saved in file: " << m_outputFile << "; Num of bytes: " << std::dec << count-sizeBytes << " bytes " << std::endl;
+  std::cout << "INFO: Read data saved in file: " << m_outputFile << "; Num of bytes: " << std::dec << count - sizeBytes << " bytes " << std::endl;
+
+  return;
 }
 
