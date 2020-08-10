@@ -136,20 +136,30 @@ OO_MemRead::execute(const SubCmdOptions& _options) const
   }
 
   std::cout << __FILE__ << " : " << __func__ << " : " << __LINE__ << std::endl; 
+  std::cout << "Device : " << m_device << std::endl;
+  std::cout << "Address : " << m_baseAddress << std::endl;
+  std::cout << "Size : " << m_sizeBytes << std::endl;
   // -- process Input option -----------------------------------------------
-  unsigned long long baseAddress = 0;
-  unsigned long long sizeBytes = 0;
-  std::stringstream sS;
-  sS << std::hex << m_baseAddress;
-  sS >> baseAddress; 
+  unsigned long long baseAddress = std::stoll(m_baseAddress,0 ,0);;
+  unsigned long long sizeBytes = std::stoll(m_sizeBytes,0 ,0);
+  /*
+  std::stringstream SsAddr;
+  SsAddr << std::hex << m_baseAddress;
+  SsAddr >> baseAddress; 
 
-  sS << std::hex << m_sizeBytes;
-  sS >> sizeBytes;
-  
-  std::cout << __FILE__ << " : " << __func__ << " : " << __LINE__ << std::endl; 
+  //SsSize << std::hex << m_sizeBytes;
+  //SsSize >> sizeBytes;
+  */
+
+  std::cout << __FILE__ << " : " << __func__ << " : " << __LINE__ << " Address : " << baseAddress << std::endl; 
+  std::cout << __FILE__ << " : " << __func__ << " : " << __LINE__ << " Size : " << sizeBytes << std::endl; 
+  //if (!sizeBytes)
+  //   return;
+#if 0 
   // Output file
   if (!m_outputFile.empty() && boost::filesystem::exists(m_outputFile))
       throw xrt_core::error((boost::format("Output file already exists: '%s'") % m_outputFile).str());
+#endif
 
   std::cout << __FILE__ << " : " << __func__ << " : " << __LINE__ << std::endl; 
   // -- process "device" option -----------------------------------------------
