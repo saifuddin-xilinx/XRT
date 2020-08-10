@@ -14,8 +14,8 @@
  * under the License.
  */
 
-#ifndef __XBUtilities_h_
-#define __XBUtilities_h_
+#ifndef __XBMemAccess_h_
+#define __XBMemAccess_h_
 
 // Include files
 // Please keep these to the bare minimum
@@ -28,7 +28,19 @@
 #include <boost/program_options.hpp>
 #include <boost/algorithm/string.hpp>
 
-namespace XBUtilities {
+namespace XBMemAccess {
+    struct mem_bank_t {
+        uint64_t m_base_address;
+        uint64_t m_size;
+        int m_index;
+        mem_bank_t (uint64_t aAddr, uint64_t aSize, int aIndex) : m_base_address(aAddr), m_size(aSize), m_index(aIndex) {}
+    };
+
+    size_t getDDRMemSize(const std::shared_ptr<xrt_core::device>& dev);
+    int getDDRBanks(const std::shared_ptr<xrt_core::device> dev, std::vector<mem_bank_t>& aBanks);
+    int readWriteHelper (const std::shared_ptr<xrt_core::device> dev, unsigned long long& aStartAddr, 
+            unsigned long long& aSize, std::vector<mem_bank_t>& vec_banks, std::vector<mem_bank_t>::iterator& startbank);
+#if 0
   typedef enum {
     MT_MESSAGE,
     MT_INFO,
@@ -88,7 +100,7 @@ namespace XBUtilities {
                         unsigned int _columnWidth, 
                         bool _indentFirstLine,
                         std::string &_formattedString);
-  
+
   void collect_devices( const std::set<std::string>  &_deviceBDFs,
                         bool _inUserDomain,
                         xrt_core::device_collection &_deviceCollection);
@@ -117,6 +129,7 @@ namespace XBUtilities {
   std::vector<std::string> get_uuids(const void *dtbuf);
 
   reset_type str_to_enum_reset(const std::string& str);
+#endif
 };
 
 #endif

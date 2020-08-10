@@ -16,13 +16,25 @@
 // ------ I N C L U D E   F I L E S -------------------------------------------
 // Local - Include Files
 #include "OO_MemRead.h"
+#include "XBMemAccess.h"
+#include "core/common/system.h"
+#include "core/common/device.h"
+#include "core/common/memalign.h"
+#include "core/common/utils.h"
 #include "tools/common/XBUtilities.h"
+
 namespace XBU = XBUtilities;
+namespace XBM = XBMemAccess;
 
 // 3rd Party Library - Include Files
+#include <boost/program_options.hpp>
+#include <boost/filesystem.hpp>
+#include <boost/format.hpp>
+namespace po = boost::program_options;
 
 // System - Include Files
 #include <iostream>
+#include <fstream>
 
 // ----- C L A S S   M E T H O D S -------------------------------------------
 
@@ -48,9 +60,161 @@ OO_MemRead::OO_MemRead( const std::string &_longName, bool _isHidden )
   ;
 }
 
+/*
+ * readBank()
+ *
+ * Read from specified address, specified size within a bank
+ * Caller's responsibility to do sanity checks. No sanity checks done here
+ */
+static int 
+readBank(xclDeviceHandle mHandle, std::ofstream& aOutFile, unsigned long long aStartAddr, unsigned long long aSize) {
+    unsigned long long blockSize = 0x20000;
+    auto buf = xrt_core::aligned_alloc(getpagesize(), blockSize);
+    if (!buf)
+        return -1;
+    std::memset(buf.get(), 0, blockSize);
+
+    size_t count = aSize;
+    uint64_t incr;
+    auto guard = xrt_core::utils::ios_restore(std::cout);
+    for (uint64_t phy = aStartAddr; phy < aStartAddr+aSize; phy += incr) {
+        incr = (count >= blockSize) ? blockSize : count;
+        //std::cout << "Reading from addr " << std::hex << phy << " aSize = " << std::hex << incr << std::dec << std::endl;
+        if (xclUnmgdPread(mHandle, 0, buf.get(), incr, phy) < 0) {
+            //error
+            std::cout << "Error (" << strerror (errno) << ") reading 0x" << std::hex << incr << " bytes from DDR/HBM/PLRAM at offset 0x" << std::hex << phy << std::dec << "\n";
+            return -1;
+        }
+        count -= incr;
+        if (incr) {
+            aOutFile.write(reinterpret_cast<const char*>(buf.get()), incr);
+            if ((aOutFile.rdstate() & std::ifstream::failbit) != 0) {
+                std::cout << "Error writing to file at offset " << aSize-count << "\n";
+            }
+        }
+        std::cout << "INFO: Read size 0x" << std::hex << incr << " B from addr 0x" << phy
+            << ". Total Read so far 0x" << aSize-count << std::endl;
+    }
+    if (count != 0) {
+        std::cout << "Error! Read " << std::dec << aSize-count << " bytes, requested " << aSize << std::endl;
+        return -1;
+    }
+
+    return count;
+}
+
 void
-OO_MemRead::execute(const SubCmdOptions& /*_options*/) const
+OO_MemRead::execute(const SubCmdOptions& _options) const
 {
-  printHelp();
+  XBU::verbose("SubCommand: mem-read");
+  
+  bool help = false;
+  po::options_description hiddenOptions("Hidden Options");
+
+  po::options_description allOptions("All Options");
+  allOptions.add(m_optionsDescription);
+  allOptions.add(hiddenOptions);
+
+  // Parse sub-command ...
+  po::variables_map vm;
+
+  try {
+    po::store(po::command_line_parser(_options).options(allOptions).run(), vm);
+    po::notify(vm); // Can throw
+  } catch (po::error& e) {
+    std::cerr << "ERROR: " << e.what() << std::endl << std::endl;
+    printHelp();
+
+    // Re-throw exception
+    throw;
+  }
+
+  // Check to see if help was requested or no command was found
+  if (help == true)  {
+    printHelp();
+    return;
+  }
+
+  std::cout << __FILE__ << " : " << __func__ << " : " << __LINE__ << std::endl; 
+  // -- process Input option -----------------------------------------------
+  unsigned long long baseAddress = 0;
+  unsigned long long sizeBytes = 0;
+  std::stringstream sS;
+  sS << std::hex << m_baseAddress;
+  sS >> baseAddress; 
+
+  sS << std::hex << m_sizeBytes;
+  sS >> sizeBytes;
+  
+  std::cout << __FILE__ << " : " << __func__ << " : " << __LINE__ << std::endl; 
+  // Output file
+  if (!m_outputFile.empty() && boost::filesystem::exists(m_outputFile))
+      throw xrt_core::error((boost::format("Output file already exists: '%s'") % m_outputFile).str());
+
+  std::cout << __FILE__ << " : " << __func__ << " : " << __LINE__ << std::endl; 
+  // -- process "device" option -----------------------------------------------
+  std::string deviceBDF;
+  std::cout << __FILE__ << " : " << __func__ << " : " << __LINE__ << " m_device : " << m_device << std::endl; 
+  deviceBDF = boost::algorithm::to_lower_copy(m_device);
+  std::cout << __FILE__ << " : " << __func__ << " : " << __LINE__ << "  deviceBDF : " << deviceBDF << std::endl; 
+  auto index = xrt_core::utils::bdf2index(deviceBDF, true /*_inUserDomain*/);         // Can throw
+  std::cout << __FILE__ << " : " << __func__ << " : " << __LINE__ << " : " << index << std::endl; 
+  
+  std::cout << __FILE__ << " : " << __func__ << " : " << __LINE__ << std::endl; 
+  auto const dev = xrt_core::get_userpf_device(index); 
+  auto const m_handle = dev->get_device_handle();
+  std::vector<XBM::mem_bank_t> vec_banks;
+  std::vector<XBM::mem_bank_t>::iterator startbank;
+  int bankcnt = 0;
+
+  std::cout << __FILE__ << " : " << __func__ << " : " << __LINE__ << std::endl; 
+  std::cout << "DDR size : " << XBM::getDDRMemSize(dev) << std::endl; 
+
+  //Sanity check the address and size against the mem topology
+  if ((bankcnt = XBM::readWriteHelper(dev, baseAddress, sizeBytes, vec_banks, startbank)) == -EINVAL) {
+      std::cout << "Sanity check failed. Invalid address or Size " << std::endl;
+      return;
+  }
+
+  if (bankcnt > 1) {
+      std::cout << "INFO: Reading " << std::dec << sizeBytes << " bytes from DDR/HBM/PLRAM address 0x"  << std::hex << baseAddress
+          << " straddles " << bankcnt << " banks" << std::dec << std::endl;
+  }
+  else {
+      std::cout << "INFO: Reading from single bank, " << std::dec << sizeBytes << " bytes from DDR/HBM/PLRAM address 0x"  << std::hex << baseAddress
+          << std::dec << std::endl;
+  }
+  std::ofstream fOutput;
+  fOutput.open(m_outputFile, std::ios::out | std::ios::binary);
+  if (!fOutput.is_open())
+      throw xrt_core::error((boost::format("Unable to open the file '%s' for writing.") % m_outputFile).str());
+
+#if 1
+  size_t count = sizeBytes;
+  for(auto it = startbank; it!=vec_banks.end(); ++it) {
+      unsigned long long available_bank_size;
+      if (it != startbank) {
+          baseAddress = it->m_base_address;
+          available_bank_size = it->m_size;
+      }
+      else {
+          available_bank_size = it->m_size - (baseAddress - it->m_base_address);
+      }
+      if (sizeBytes != 0) {
+          unsigned long long readsize = (sizeBytes > available_bank_size) ? (unsigned long long) available_bank_size : sizeBytes;
+          if( readBank(m_handle, fOutput, baseAddress, readsize) == -1) {
+              std::cout << "Error! Read " << std::dec << sizeBytes-count << " bytes, requested " << sizeBytes << std::endl;
+              return;
+          }
+          sizeBytes -= readsize;
+      }
+      else {
+          break;
+      }
+  }
+#endif
+
+  fOutput.close();
+  std::cout << "INFO: Read data saved in file: " << m_outputFile << "; Num of bytes: " << std::dec << count-sizeBytes << " bytes " << std::endl;
 }
 
