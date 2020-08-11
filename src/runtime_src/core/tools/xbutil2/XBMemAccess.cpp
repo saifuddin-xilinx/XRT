@@ -103,9 +103,8 @@ int XBMemAccess::readWriteHelper (const std::shared_ptr<xrt_core::device> dev, u
         unsigned long long& aSize, std::vector<mem_bank_t>& vec_banks, std::vector<mem_bank_t>::iterator& startbank) {
     std::stringstream sstr;
     int nbanks = getDDRBanks(dev, vec_banks);
-    if (!nbanks) {
-        std::cout << "ERROR: Memory topology is not available, ensure that a valid bitstream is programmed onto the card" << std::endl;
-        return -EINVAL;
+    if (nbanks == -EINVAL) {
+        return nbanks;
     }
 
     //if given start address is 0 then choose start address to be the lowest address available

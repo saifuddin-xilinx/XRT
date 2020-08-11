@@ -79,7 +79,6 @@ readBank(xclDeviceHandle mHandle, std::ofstream& aOutFile, unsigned long long aS
     auto guard = xrt_core::utils::ios_restore(std::cout);
     for (uint64_t phy = aStartAddr; phy < aStartAddr+aSize; phy += incr) {
         incr = (count >= blockSize) ? blockSize : count;
-        //std::cout << "Reading from addr " << std::hex << phy << " aSize = " << std::hex << incr << std::dec << std::endl;
         if (xclUnmgdPread(mHandle, 0, buf.get(), incr, phy) < 0) {
             //error
             std::cout << "Error (" << strerror (errno) << ") reading 0x" << std::hex << incr << " bytes from DDR/HBM/PLRAM at offset 0x" << std::hex << phy << std::dec << "\n";
@@ -106,7 +105,7 @@ readBank(xclDeviceHandle mHandle, std::ofstream& aOutFile, unsigned long long aS
 void
 OO_MemRead::execute(const SubCmdOptions& _options) const
 {
-  XBU::verbose("SubCommand: mem-read");
+  XBU::verbose("SubCommand: read-mem");
   
   bool help = false;
   po::options_description hiddenOptions("Hidden Options");
@@ -143,8 +142,8 @@ OO_MemRead::execute(const SubCmdOptions& _options) const
      return; // Invaid device index 
 
   // -- process Input Address and Size -----------------------------------
-  unsigned long long baseAddress = std::stoll(m_baseAddress,0 ,0);;
-  unsigned long long sizeBytes = std::stoll(m_sizeBytes,0 ,0); 
+  unsigned long long baseAddress = std::stoll(m_baseAddress, 0, 0);
+  unsigned long long sizeBytes = std::stoll(m_sizeBytes, 0, 0); 
 
   // -- process Output File ----------------------------------------------
   std::ofstream fOutput;
@@ -161,7 +160,6 @@ OO_MemRead::execute(const SubCmdOptions& _options) const
 
   //Sanity check the address and size against the mem topology
   if ((bankcnt = XBM::readWriteHelper(dev, baseAddress, sizeBytes, vec_banks, startbank)) == -EINVAL) {
-      std::cout << "Sanity check failed. Invalid address or Size " << std::endl;
       return;
   }
 
