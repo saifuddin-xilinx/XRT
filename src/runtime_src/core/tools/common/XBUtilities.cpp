@@ -211,33 +211,6 @@ XBUtilities::trace(const std::string& _msg, bool _endl)
   message_(MT_TRACE, _msg, _endl); 
 }
 
-/*
- * xclbin locking
- */
-struct xclbin_lock
-{
-  xclDeviceHandle m_handle;
-  xuid_t m_uuid;
-
-  xclbin_lock(std::shared_ptr<xrt_core::device> _dev)
-    : m_handle(_dev->get_device_handle())
-  {
-    auto xclbinid = xrt_core::device_query<xrt_core::query::xclbin_uuid>(_dev);
-
-    uuid_parse(xclbinid.c_str(), m_uuid);
-
-    if (uuid_is_null(m_uuid))
-      throw std::runtime_error("'uuid' invalid, please re-program xclbin.");
-
-    if (xclOpenContext(m_handle, m_uuid, std::numeric_limits<unsigned int>::max(), true))
-      throw std::runtime_error("'Failed to lock down xclbin");
-  }
-
-  ~xclbin_lock(){
-    xclCloseContext(m_handle, m_uuid, std::numeric_limits<unsigned int>::max());
-  }
-};
-
 void 
 XBUtilities::trace_print_tree(const std::string & _name, 
                               const boost::property_tree::ptree & _pt)

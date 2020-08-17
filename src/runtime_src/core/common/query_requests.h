@@ -68,6 +68,7 @@ enum class key_type
   xclbin_uuid,
   mem_topology_raw,
   ip_layout_raw,
+  kds_custat,
 
   xmc_version,
   xmc_board_name,
@@ -536,6 +537,15 @@ struct ip_layout_raw : request
 {
   using result_type = std::vector<char>;
   static const key_type key = key_type::ip_layout_raw;
+
+  virtual boost::any
+  get(const device*) const = 0;
+};
+
+struct kds_custat : request
+{
+  using result_type = std::vector<std::string>;
+  static const key_type key = key_type::kds_custat;
 
   virtual boost::any
   get(const device*) const = 0;
