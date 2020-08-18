@@ -69,6 +69,7 @@ enum class key_type
   mem_topology_raw,
   ip_layout_raw,
   kds_custat,
+  scheduler_update_stat,
 
   xmc_version,
   xmc_board_name,
@@ -546,6 +547,15 @@ struct kds_custat : request
 {
   using result_type = std::vector<std::string>;
   static const key_type key = key_type::kds_custat;
+
+  virtual boost::any
+  get(const device*) const = 0;
+};
+
+struct scheduler_update_stat : request
+{
+  using result_type = std::vector<std::string>;
+  static const key_type key = key_type::scheduler_update_stat;
 
   virtual boost::any
   get(const device*) const = 0;

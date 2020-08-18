@@ -56,21 +56,17 @@ struct xclbin_lock
   }
 };
 
-#if 0
 void
 schedulerUpdateStat(const xrt_core::device *device)
 {
     try {
-      auto const m_handle = device->get_device_handle();
       xclbin_lock xb_lock(device);
-      /* SAIF TODO : Need to check how we can refer this */
-      xclUpdateSchedulerStat(m_handle);
+      xrt_core::device_query<qr::scheduler_update_stat>(device);
     }
     catch (const std::exception&) {
       // xclbin_lock failed, safe to ignore
     }
 }
-#endif
 
 uint32_t 
 parseComputeUnitStat(const std::vector<std::string>& custat, uint32_t offset, cu_stat kind) 
@@ -98,10 +94,8 @@ parseComputeUnitStat(const std::vector<std::string>& custat, uint32_t offset, cu
 boost::property_tree::ptree
 populate_cus(const xrt_core::device *device, const std::string& desc)
 {
-#if 0
   if (!std::getenv("XCL_SKIP_CU_READ"))
     schedulerUpdateStat(device);
-#endif
 
   boost::property_tree::ptree pt;
   std::vector<char> ip_buf;

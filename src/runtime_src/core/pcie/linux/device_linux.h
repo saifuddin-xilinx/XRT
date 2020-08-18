@@ -19,6 +19,7 @@
 
 #include "core/common/ishim.h"
 #include "core/pcie/common/device_pcie.h"
+#include "core/pcie/linux/shim.h"
 
 namespace xrt_core {
 
