@@ -80,21 +80,21 @@ readBank(xclDeviceHandle mHandle, std::ofstream& aOutFile, unsigned long long aS
         incr = (count >= blockSize) ? blockSize : count;
         if (xclUnmgdPread(mHandle, 0, buf.get(), incr, phy) < 0) {
             //error
-            std::cout << "Error (" << strerror (errno) << ") reading 0x" << std::hex << incr << " bytes from DDR/HBM/PLRAM at offset 0x" << std::hex << phy << std::dec << "\n";
+            std::cout << "ERROR: (" << strerror (errno) << ") reading 0x" << std::hex << incr << " bytes from DDR/HBM/PLRAM at offset 0x" << std::hex << phy << std::dec << "\n";
             return -1;
         }
         count -= incr;
         if (incr) {
             aOutFile.write(reinterpret_cast<const char*>(buf.get()), incr);
             if ((aOutFile.rdstate() & std::ifstream::failbit) != 0) {
-                std::cout << "Error writing to file at offset " << aSize-count << "\n";
+                std::cout << "ERROR: writing to file at offset " << aSize-count << "\n";
             }
         }
         std::cout << "INFO: Read size 0x" << std::hex << incr << " B from addr 0x" << phy
             << ". Total Read so far 0x" << aSize-count << std::endl;
     }
     if (count != 0) {
-        std::cout << "Error! Read " << std::dec << aSize-count << " bytes, requested " << aSize << std::endl;
+        std::cout << "ERROR: Read " << std::dec << aSize-count << " bytes, requested " << aSize << std::endl;
         return -1;
     }
 
@@ -184,7 +184,7 @@ OO_MemRead::execute(const SubCmdOptions& _options) const
       if (sizeBytes != 0) {
           unsigned long long readsize = (sizeBytes > available_bank_size) ? (unsigned long long) available_bank_size : sizeBytes;
           if( readBank(m_handle, fOutput, baseAddress, readsize) == -1) {
-              std::cout << "Error! Read " << std::dec << sizeBytes-count << " bytes, requested " << sizeBytes << std::endl;
+              std::cout << "ERROR: Read " << std::dec << sizeBytes-count << " bytes, requested " << sizeBytes << std::endl;
               return;
           }
           sizeBytes -= readsize;

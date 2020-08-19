@@ -87,7 +87,7 @@ writeBank(xclDeviceHandle mHandle, unsigned long long aStartAddr, unsigned long 
       incr = (count >= blockSize) ? blockSize : count;
       if (xclUnmgdPwrite(mHandle, 0, inputBuf, incr, phy) < 0) {
           //error
-          std::cout << "Error (" << strerror (errno) << ") writing 0x" << std::hex << incr << " bytes to DDR/HBM/PLRAM at offset 0x" << std::hex << phy << std::dec << "\n";
+          std::cout << "ERROR: (" << strerror (errno) << ") writing 0x" << std::hex << incr << " bytes to DDR/HBM/PLRAM at offset 0x" << std::hex << phy << std::dec << "\n";
           return -1;
       }
       count -= incr;
@@ -95,7 +95,7 @@ writeBank(xclDeviceHandle mHandle, unsigned long long aStartAddr, unsigned long 
   }
 
   if (count != 0) {
-      std::cout << "Error! Written " << std::dec << size-count << " bytes, requested " << size << std::endl;
+      std::cout << "ERROR: Written " << std::dec << size-count << " bytes, requested " << size << std::endl;
       return -1;
   }
 
