@@ -328,6 +328,7 @@ initialize_query_table()
   emplace_sysfs_get<query::power_microwatts>            ("xmc", "xmc_power");
   emplace_sysfs_get<query::host_mem_size>               ("address_translator", "host_mem_size");
   emplace_sysfs_get<query::kds_numcdmas>                ("mb_scheduler", "kds_numcdmas");
+  emplace_sysfs_get<query::kds_custat>                  ("mb_scheduler", "kds_custat");
 
   //emplace_sysfs_get<query::mig_ecc_enabled,         sp::_4, "ecc_enabled");
   //emplace_sysfs_get<query::mig_ecc_status,          sp::_4, "ecc_status");

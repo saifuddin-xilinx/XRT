@@ -183,6 +183,7 @@ initialize_query_table()
   emplace_sysfs_request<query::mem_topology_raw>          ("mem_topology");
   emplace_sysfs_request<query::ip_layout_raw>             ("ip_layout");
   emplace_sysfs_request<query::aie_metadata>              ("aie_metadata");
+  emplace_sysfs_request<query::kds_custat>                ("kds_custat");
 }
 
 struct X { X() { initialize_query_table(); } };

@@ -161,6 +161,7 @@ ReportCu::writeReport( const xrt_core::device * _pDevice,
   getPropertyTreeInternal(_pDevice, _pt);
  
   _output << boost::format("%s\n") % _pt.get<std::string>("cus.description");
+  _output << boost::format("[\n");
   int index = 0;
   try {
     for (auto& v : _pt.get_child("cus.board.compute_unit")) {
@@ -176,11 +177,13 @@ ReportCu::writeReport( const xrt_core::device * _pDevice,
           status = subv.second.get_value<std::string>();
         }
       }
-      _output << boost::format(" [CU - %2d]\n") % index;
-      _output << boost::format("   \"name\": %-16s\n") % name;
-      _output << boost::format("   \"base_address\": %-16s\n") % base_addr;
-      _output << boost::format("   \"usage\": %-16s\n") % usage;
-      _output << boost::format("   \"status\": %-16s\n") % status;
+      _output << boost::format("\t\"%d\":\n") % index;
+      _output << boost::format("\t{\n");
+      _output << boost::format("\t\t\"name\": %-16s\n") % name;
+      _output << boost::format("\t\t\"base_address\": %-16s\n") % base_addr;
+      _output << boost::format("\t\t\"usage\": %-16s\n") % usage;
+      _output << boost::format("\t\t\"status\": %-16s\n") % status;
+      _output << boost::format("\t}\n");
       index++;
     }
   }
@@ -188,5 +191,6 @@ ReportCu::writeReport( const xrt_core::device * _pDevice,
       // eat the exception, probably bad path
   }
 
+  _output << boost::format("]\n");
   _output << std::endl;
 }
