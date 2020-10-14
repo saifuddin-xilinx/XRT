@@ -729,11 +729,18 @@ get_cu_memidx() const
       for (auto& cu : get_cu_range())
         mask &= cu->get_memidx_intersect();
 
+      auto mems = m_metadata.get_mem_topology();
       // select first common memory bank index if any
       for (size_t idx=0; idx<mask.size(); ++idx) {
         if (mask.test(idx)) {
-          m_cu_memidx = idx;
-          break;
+	  if (m_cu_memidx == -1)
+		m_cu_memidx = idx; // Select first common memory bank
+	  else {
+	    if (strstr((const char*)mems->m_mem_data[idx].m_tag, "MBG")) {
+		m_cu_memidx = idx;  // Select Group if present prior to bank
+		break;
+	    }
+	  }
         }
       }
     }
