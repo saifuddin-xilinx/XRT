@@ -730,13 +730,16 @@ get_cu_memidx() const
         mask &= cu->get_memidx_intersect();
 
       auto mems = m_metadata.get_mem_topology();
+      if (!mems)
+        throw xocl::error(CL_INVALID_OPERATION, "Mem topology section does not exist");
+
       // select first common memory bank index if any
       for (size_t idx=0; idx<mask.size(); ++idx) {
         if (mask.test(idx)) {
 	  if (m_cu_memidx == -1)
 		m_cu_memidx = idx; // Select first common memory bank
 	  else {
-	    if (strstr((const char*)mems->m_mem_data[idx].m_tag, "MBG")) {
+	    if (idx < (size_t)mems->m_count && strstr((const char*)mems->m_mem_data[idx].m_tag, "MBG")) {
 		m_cu_memidx = idx;  // Select Group if present prior to bank
 		break;
 	    }
