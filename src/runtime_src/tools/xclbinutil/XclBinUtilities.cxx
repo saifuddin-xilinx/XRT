@@ -693,12 +693,15 @@ createMemoryBankGroupEntries( std::vector<WorkingConnection> & workingConnection
       else 
         ptGroupMemory.put("m_sizeKB", XUtil::format("0x%lx", groupSize / 1024).c_str());
 
-      // Add a tag value to indicate that this entry was the result of grouping memories
+      // Add a tag value to indicate that this range was the result of grouping memories
+      // as MBG[startIndex:endIndex] format.
       std::string newTag = "MBG[";
+      newTag += std::to_string(workingConnections[startIndex].memIndex);
       for (unsigned int memIndex = startIndex; memIndex <= endIndex; ++memIndex) {
-        newTag += std::to_string(workingConnections[memIndex].memIndex);
-        newTag += (memIndex != endIndex) ? "," : "]";
+        if (memIndex < endIndex && workingConnections[memIndex].memIndex + 1 != workingConnections[memIndex + 1].memIndex)
+	  throw std::runtime_error("ERROR: Memory Banks are not contigious in this Group.");
       }
+      newTag += ":" + std::to_string(workingConnections[endIndex].memIndex) + "]";
 
       // Record the new tag, honoring the size limitation
       ptGroupMemory.put("m_tag", newTag.substr(0, sizeof(mem_data::m_tag) - 1).c_str());
