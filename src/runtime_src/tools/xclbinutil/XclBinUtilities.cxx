@@ -699,7 +699,7 @@ createMemoryBankGroupEntries( std::vector<WorkingConnection> & workingConnection
       newTag += std::to_string(workingConnections[startIndex].memIndex);
       for (unsigned int memIndex = startIndex; memIndex <= endIndex; ++memIndex) {
         if (memIndex < endIndex && workingConnections[memIndex].memIndex + 1 != workingConnections[memIndex + 1].memIndex)
-	  throw std::runtime_error("ERROR: Memory Banks are not contigious in this Group.");
+          std::cout << "Warning: Memory Banks are not contigious in this Group." << std::endl;
       }
       newTag += ":" + std::to_string(workingConnections[endIndex].memIndex) + "]";
 
