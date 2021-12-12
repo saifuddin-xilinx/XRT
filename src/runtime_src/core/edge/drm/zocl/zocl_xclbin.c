@@ -59,35 +59,37 @@ zocl_fpga_mgr_load(struct drm_zocl_dev *zdev, const char *data, int size, u32 fl
 }
 
 static int
-zocl_load_partial(struct drm_zocl_dev *zdev, const char *buffer, int length)
+zocl_load_partial(struct drm_zocl_dev *zdev, const char *buffer, int length,
+		  struct drm_zocl_domain *domain)
 {
 	int err;
 	void __iomem *map = NULL;
 
-	if (!zdev->pr_isolation_addr) {
+	if (!domain->pr_isolation_addr) {
 		DRM_ERROR("PR isolation address is not set");
 		return -ENODEV;
 	}
 
-	map = ioremap(zdev->pr_isolation_addr, PR_ISO_SIZE);
+	map = ioremap(domain->pr_isolation_addr, PR_ISO_SIZE);
 	if (IS_ERR_OR_NULL(map)) {
 		DRM_ERROR("ioremap PR isolation address 0x%llx failed",
-		    zdev->pr_isolation_addr);
+		    domain->pr_isolation_addr);
 		return -EFAULT;
 	}
 
 	/* Freeze PR ISOLATION IP for bitstream download */
-	iowrite32(zdev->pr_isolation_freeze, map);
+	iowrite32(domain->pr_isolation_freeze, map);
 	err = zocl_fpga_mgr_load(zdev, buffer, length, FPGA_MGR_PARTIAL_RECONFIG);
 	/* Unfreeze PR ISOLATION IP */
-	iowrite32(zdev->pr_isolation_unfreeze, map);
+	iowrite32(domain->pr_isolation_unfreeze, map);
 
 	iounmap(map);
 	return err;
 }
 
 static int
-zocl_load_bitstream(struct drm_zocl_dev *zdev, char *buffer, int length)
+zocl_load_bitstream(struct drm_zocl_dev *zdev, char *buffer, int length,
+		   struct drm_zocl_domain *domain)
 {
 	struct XHwIcap_Bit_Header bit_header;
 	char *data = NULL;
@@ -121,8 +123,9 @@ zocl_load_bitstream(struct drm_zocl_dev *zdev, char *buffer, int length)
 	}
 
 	/* On pr platofrm load partial bitstream and on Flat platform load full bitstream */
-	if (zdev->pr_isolation_addr)
-		return zocl_load_partial(zdev, data, bit_header.BitstreamLength);
+	if (domain->pr_isolation_addr)
+		return zocl_load_partial(zdev, data, bit_header.BitstreamLength,
+					 domain);
 	else {
 		/* 0 is for full bitstream */
 		return zocl_fpga_mgr_load(zdev, buffer, length, 0);
@@ -278,6 +281,54 @@ static inline u32 xclbin_intr_id(u32 prop)
 	return intr_id >> IP_INTERRUPT_ID_SHIFT;
 }
 
+static int
+get_next_free_apt_index(struct drm_zocl_dev *zdev)
+{
+	int apt_idx;
+
+	for (apt_idx = 0; apt_idx < MAX_APT_NUM; ++apt_idx) {
+		/* If phy_addr doesn't have any non zero address,
+		 * consider it as free index */
+		if (zdev->apertures[apt_idx].phy_addr == 0)
+			return apt_idx;
+	}
+
+	return -EINVAL;
+}
+
+static void
+update_max_apt_number(struct drm_zocl_dev *zdev)
+{
+	int apt_idx;
+
+	zdev->num_apts = 0;
+	for (apt_idx = 0; apt_idx < MAX_APT_NUM; ++apt_idx) {
+		if (zdev->apertures[apt_idx].phy_addr != 0)
+			zdev->num_apts = apt_idx;
+	}
+}
+
+static void
+zocl_clean_aperture(struct drm_zocl_dev *zdev, int domain_idx)
+{
+	int apt_idx;
+	struct addr_aperture *apt;
+
+	for (apt_idx = 0; apt_idx < MAX_APT_NUM; ++apt_idx) {
+		apt = zdev->apertures[apt_idx];
+		if (apt->domain_idx == domain_idx) {
+			/* Reset this aperture index */
+			apt->addr = 0;
+			apt->size = 0;
+			apt->prop = 0;
+			apt->cu_idx = -1;
+			apt->domain_idx = -1;
+		}
+	}
+
+	update_max_apt_number(zdev);
+}
+
 /* Record all of the hardware address apertures in the XCLBIN
  * This could be used to verify if the configure command set wrong CU base
  * address and allow user map one of the aperture to user space.
@@ -285,7 +336,7 @@ static inline u32 xclbin_intr_id(u32 prop)
  * The xclbin doesn't contain IP size. Use hardcoding size for now.
  */
 static int
-zocl_update_apertures(struct drm_zocl_dev *zdev)
+zocl_update_apertures(struct drm_zocl_dev *zdev, struct drm_zocl_domain *domain)
 {
 	struct ip_data *ip;
 	struct debug_ip_data *dbg_ip;
@@ -294,60 +345,70 @@ zocl_update_apertures(struct drm_zocl_dev *zdev)
 	int i;
 
 	/* Update aperture should only happen when loading xclbin */
-	kfree(zdev->apertures);
-	zdev->apertures = NULL;
-	zdev->num_apts = 0;
+	if (domain->ip)
+		total += domain->ip->m_count;
 
-	if (zdev->ip)
-		total += zdev->ip->m_count;
-
-	if (zdev->debug_ip)
-		total += zdev->debug_ip->m_count;
+	if (domain->debug_ip)
+		total += domain->debug_ip->m_count;
 
 	if (total == 0)
 		return 0;
 
 	/* If this happened, the xclbin is super bad */
-	if (total < 0) {
+	if ((total < 0) || (total > MAX_APT_NUM)) {
 		DRM_ERROR("Invalid number of apertures\n");
 		return -EINVAL;
 	}
 
-	apt = kcalloc(total, sizeof(struct addr_aperture), GFP_KERNEL);
-	if (!apt) {
-		DRM_ERROR("Out of memory\n");
-		return -ENOMEM;
-	}
+	/* Cleanup the aperture for this domain before update for new xclbin */
+	zocl_clean_aperture(zdev, domain->domain_idx);
 
-	if (zdev->ip) {
-		for (i = 0; i < zdev->ip->m_count; ++i) {
-			ip = &zdev->ip->m_ip_data[i];
-			apt[zdev->num_apts].addr = ip->m_base_address;
-			apt[zdev->num_apts].size = CU_SIZE;
-			apt[zdev->num_apts].prop = ip->properties;
-			apt[zdev->num_apts].cu_idx = -1;
-			zdev->num_apts++;
+	/* Now update the aperture for the new xclbin */
+	if (domain->ip) {
+		for (i = 0; i < domain->ip->m_count; ++i) {
+			ip = &domain->ip->m_ip_data[i];
+			apt_idx = get_next_free_apt_index(zdev);
+			if (apt_idx < 0) {
+				DRM_ERROR("No more free apertures\n");
+				return -EINVAL;
+			}
+			apt = zdev->apertures[apt_idx];
+
+			apt->addr = ip->m_base_address;
+			apt->size = CU_SIZE;
+			apt->prop = ip->properties;
+			apt->cu_idx = -1;
+			apt->domain_idx = domain->domain_idx;
 		}
+		/* Update num_apts based on current index */
+		update_max_apt_number(zdev);
 	}
 
-	if (zdev->debug_ip) {
-		for (i = 0; i < zdev->debug_ip->m_count; ++i) {
-			dbg_ip = &zdev->debug_ip->m_debug_ip_data[i];
-			apt[zdev->num_apts].addr = dbg_ip->m_base_address;
+	if (domain->debug_ip) {
+		for (i = 0; i < domain->debug_ip->m_count; ++i) {
+			dbg_ip = &domain->debug_ip->m_debug_ip_data[i];
+			apt_idx = get_next_free_apt_index(zdev);
+			if (apt_idx < 0) {
+				DRM_ERROR("No more free apertures\n");
+				return -EINVAL;
+			}
+			apt = zdev->apertures[apt_idx];
+
+			apt->addr = dbg_ip->m_base_address;
+			apt->domain_idx = domain->domain_idx;
 			if (dbg_ip->m_type == AXI_MONITOR_FIFO_LITE
 			    || dbg_ip->m_type == AXI_MONITOR_FIFO_FULL)
 				/* FIFO_LITE has 4KB and FIFO FULL has 8KB
 				 * address range. Use both 8K is okay.
 				 */
-				apt[zdev->num_apts].size = _8KB;
+				apt->size = _8KB;
 			else
 				/* Others debug IPs have 64KB address range*/
-				apt[zdev->num_apts].size = _64KB;
-			zdev->num_apts++;
+				apt->size = _64KB;
 		}
+		/* Update num_apts based on current index */
+		update_max_apt_number(zdev);
 	}
-
-	zdev->apertures = apt;
 
 	return 0;
 }
@@ -420,10 +481,10 @@ err:
 }
 
 static inline bool
-zocl_xclbin_same_uuid(struct drm_zocl_dev *zdev, xuid_t *uuid)
+zocl_xclbin_same_uuid(struct drm_zocl_domain *domain, xuid_t *uuid)
 {
-	return (zocl_xclbin_get_uuid(zdev) != NULL &&
-	    uuid_equal(uuid, zocl_xclbin_get_uuid(zdev)));
+	return (zocl_xclbin_get_uuid(domain) != NULL &&
+	    uuid_equal(uuid, zocl_xclbin_get_uuid(domain)));
 }
 
 /*
@@ -543,9 +604,34 @@ zocl_load_aie_only_pdi(struct drm_zocl_dev *zdev, struct axlf *axlf,
 	return ret;
 }
 
+void zocl_free_sections(struct drm_zocl_domain *domain)
+{
+	if (domain->ip) {
+		vfree(domain->ip);
+		CLEAR(domain->ip);
+	}
+	if (domain->debug_ip) {
+		vfree(domain->debug_ip);
+		CLEAR(domain->debug_ip);
+	}
+	if (domain->connectivity) {
+		vfree(domain->connectivity);
+		CLEAR(domain->connectivity);
+	}
+	if (domain->topology) {
+		vfree(domain->topology);
+		CLEAR(domain->topology);
+	}
+	if (domain->axlf) {
+		vfree(domain->axlf);
+		CLEAR(domain->axlf);
+		domain->axlf_size = 0;
+	}
+}
+
 static int
-zocl_load_sect(struct drm_zocl_dev *zdev, struct axlf *axlf,
-	char __user *xclbin, enum axlf_section_kind kind)
+zocl_load_sect(struct drm_zocl_dev *zdev, struct axlf *axlf, char __user *xclbin,
+	      enum axlf_section_kind kind, struct drm_zocl_domain *domain)
 {
 	uint64_t size = 0;
 	char *section_buffer = NULL;
@@ -557,11 +643,11 @@ zocl_load_sect(struct drm_zocl_dev *zdev, struct axlf *axlf,
 
 	switch (kind) {
 	case BITSTREAM:
-		ret = zocl_load_bitstream(zdev, section_buffer, size);
+		ret = zocl_load_bitstream(zdev, section_buffer, size, domain);
 		break;
 	case PDI:
 	case BITSTREAM_PARTIAL_PDI:
-		ret = zocl_load_partial(zdev, section_buffer, size);
+		ret = zocl_load_partial(zdev, section_buffer, size, domain);
 		break;
 #if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
 	case PARTITION_METADATA: {
@@ -571,26 +657,29 @@ zocl_load_sect(struct drm_zocl_dev *zdev, struct axlf *axlf,
 		struct drm_zocl_bo *bo;
 		uint64_t bsize = 0;
 		uint64_t flags = 0;
-		if (zdev->partial_overlay_id != -1 && axlf->m_header.m_mode == XCLBIN_PR) {
-			err = of_overlay_remove(&zdev->partial_overlay_id);
+		if (domain->partial_overlay_id != -1 &&
+			axlf->m_header.m_mode == XCLBIN_PR) {
+			err = of_overlay_remove(&domain->partial_overlay_id);
 			if (err < 0) {
 				DRM_WARN("Failed to delete rm overlay (err=%d)\n", err);
 				ret = err;
 				break;
 			}
-			zdev->partial_overlay_id = -1;
-		} else if (zdev->full_overlay_id != -1 && axlf->m_header.m_mode == XCLBIN_FLAT) {
+			domain->partial_overlay_id = -1;
+		} else if (domain->full_overlay_id != -1 &&
+			   axlf->m_header.m_mode == XCLBIN_FLAT) {
 			err = of_overlay_remove_all();
 			if (err < 0) {
 				DRM_WARN("Failed to delete static overlay (err=%d)\n", err);
 				ret = err;
 				break;
 			}
-			zdev->partial_overlay_id = -1;
-			zdev->full_overlay_id = -1;
+			domain->partial_overlay_id = -1;
+			domain->full_overlay_id = -1;
 		}
 
-		bsize = zocl_read_sect(BITSTREAM, &bsection_buffer, axlf, xclbin);
+		bsize = zocl_read_sect(BITSTREAM, &bsection_buffer, axlf,
+				       xclbin);
 		if (bsize == 0) {
 			ret = 0;
 			break;
@@ -603,8 +692,8 @@ zocl_load_sect(struct drm_zocl_dev *zdev, struct axlf *axlf,
 			break;
 		}
 		vaddr = bo->cma_base.vaddr;
-		memcpy(vaddr,bsection_buffer,bsize);
-		
+		memcpy(vaddr, bsection_buffer, bsize);
+
 		flags = zdev->fpga_mgr->flags;
 		zdev->fpga_mgr->flags |= FPGA_MGR_CONFIG_DMA_BUF;
 		zdev->fpga_mgr->dmabuf = drm_gem_prime_export(&bo->gem_base, 0);
@@ -620,9 +709,9 @@ zocl_load_sect(struct drm_zocl_dev *zdev, struct axlf *axlf,
 		}
 
 		if (axlf->m_header.m_mode == XCLBIN_PR)
-			zdev->partial_overlay_id = id;
+			domain->partial_overlay_id = id;
 		else
-			zdev->full_overlay_id = id;
+			domain->full_overlay_id = id;
 
 		/* Restore the flags */
 		zdev->fpga_mgr->flags = flags;
@@ -630,7 +719,7 @@ zocl_load_sect(struct drm_zocl_dev *zdev, struct axlf *axlf,
 		zocl_drm_free_bo(bo);
 		vfree(bsection_buffer);
 		break;
-		}
+	}
 #endif
 	default:
 		DRM_WARN("Unsupported load type %d", kind);
@@ -658,33 +747,33 @@ is_aie_only(struct axlf *axlf)
  *       reload the hardware and can do non-destructive operations.
  */
 static int
-zocl_cache_xclbin(struct drm_zocl_dev *zdev, struct axlf *axlf,
+zocl_cache_xclbin(struct drm_zocl_domain *domain, struct axlf *axlf,
 		char __user *xclbin_ptr)
 {
 	int ret;
 	size_t size = axlf->m_header.m_length;
 
-	zdev->axlf = vmalloc(size);
-	if (!zdev->axlf)
+	domain->axlf = vmalloc(size);
+	if (!domain->axlf)
 		return -ENOMEM;
 
-	ret = copy_from_user(zdev->axlf, xclbin_ptr, size);
+	ret = copy_from_user(domain->axlf, xclbin_ptr, size);
 	if (ret) {
-		vfree(zdev->axlf);
+		vfree(domain->axlf);
 		return ret;
 	}
 
-	zdev->axlf_size = size;
+	domain->axlf_size = size;
 
 	return 0;
 }
 
 int
-zocl_xclbin_refcount(struct drm_zocl_dev *zdev)
+zocl_xclbin_refcount(struct drm_zocl_domain *domain)
 {
-	BUG_ON(!mutex_is_locked(&zdev->zdev_xclbin_lock));
+	BUG_ON(!mutex_is_locked(&domain->zdev_xclbin_lock));
 
-	return zdev->zdev_xclbin->zx_refcnt;
+	return domain->zdev_xclbin->zx_refcnt;
 }
 
 int
@@ -701,8 +790,15 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 	void *aie_res = 0;
 	uint64_t size = 0;
 	int ret = 0;
+	int domain_id = axlf_obj->za_domain_id;
+	struct drm_zocl_domain *domain = zdev->pr_domain[domain_id];
 
-	BUG_ON(!mutex_is_locked(&zdev->zdev_xclbin_lock));
+	if (!domain) {
+		DRM_ERROR("SLOT[%d] doesn't exists", domain_id);
+		return -EINVAL;
+	}
+
+	BUG_ON(!mutex_is_locked(&domain->zdev_xclbin_lock));
 
 	if (copy_from_user(&axlf_head, axlf_obj->za_xclbin_ptr,
 	    sizeof(struct axlf))) {
@@ -749,7 +845,7 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 	zocl_read_sect(AIE_RESOURCES, &aie_res, axlf, xclbin);
 
 	/* Check unique ID */
-	if (zocl_xclbin_same_uuid(zdev, &axlf_head.m_header.uuid)) {
+	if (zocl_xclbin_same_uuid(domain, &axlf_head.m_header.uuid)) {
 		if (!(axlf_obj->za_flags & DRM_ZOCL_FORCE_PROGRAM)) {
 			if (is_aie_only(axlf)) {
 				write_unlock(&zdev->attr_rwlock);
@@ -761,7 +857,7 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 					write_unlock(&zdev->attr_rwlock);
 					zocl_create_aie(zdev, axlf, aie_res);
 					write_lock(&zdev->attr_rwlock);
-					zocl_cache_xclbin(zdev, axlf, xclbin);
+					zocl_cache_xclbin(domain, axlf, xclbin);
 				}
 			} else {
 				DRM_INFO("%s The XCLBIN already loaded", __func__);
@@ -787,7 +883,7 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 		 * 3. If all contexts are closed, new kds would make sure all
 		 * relative exec BO are released
 		 */
-		if (zocl_xclbin_refcount(zdev) > 0) {
+		if (zocl_xclbin_refcount(domain) > 0) {
 			DRM_ERROR("Current xclbin is in-use, can't change");
 			ret = -EBUSY;
 			goto out0;
@@ -795,7 +891,7 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 	}
 
 	/* uuid is null means first time load xclbin */
-	if (zocl_xclbin_get_uuid(zdev) != NULL) {
+	if (zocl_xclbin_get_uuid(domain) != NULL) {
 		/* reset scheduler prior to load new xclbin */
 		if (kds_mode == 0) {
 			ret = sched_reset_exec(zdev->ddev);
@@ -804,7 +900,7 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 		}
 	}
 
-	zocl_free_sections(zdev);
+	zocl_free_sections(domain);
 
 #if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
 	if (xrt_xclbin_get_section_num(axlf, PARTITION_METADATA) &&
@@ -816,14 +912,15 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 		 * bitstream in BITSTREAM section.
 		 */
 		write_unlock(&zdev->attr_rwlock);
-		ret = zocl_load_sect(zdev, axlf, xclbin, PARTITION_METADATA);
+		ret = zocl_load_sect(zdev, axlf, xclbin, PARTITION_METADATA,
+				    domain);
 		write_lock(&zdev->attr_rwlock);
 		if (ret)
 			goto out0;
 
 	} else
 #endif
-	if (zdev->pr_isolation_addr) {
+	if (domain->pr_isolation_addr) {
 		/* For PR support platform, device-tree has configured addr */
 		if (axlf_head.m_header.m_mode != XCLBIN_PR &&
 		    axlf_head.m_header.m_mode != XCLBIN_HW_EMU &&
@@ -842,7 +939,8 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 			  * cleanup previously loaded xclbin related data
 			  * before loading new bitstream/pdi
 			  */
-			if (kds_mode == 1 && (zocl_xclbin_get_uuid(zdev) != NULL)) {
+			if (kds_mode == 1 &&
+				(zocl_xclbin_get_uuid(domain) != NULL)) {
 				subdev_destroy_cu(zdev);
 				if (zdev->aie) {
 					/*
@@ -862,20 +960,21 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 			 * if there is one, before loading AIE PDI.
 			 */
 			write_unlock(&zdev->attr_rwlock);
-			ret = zocl_load_sect(zdev, axlf, xclbin, BITSTREAM);
+			ret = zocl_load_sect(zdev, axlf, xclbin, BITSTREAM,
+					    domain);
 			write_lock(&zdev->attr_rwlock);
 			if (ret)
 				goto out0;
 
 			write_unlock(&zdev->attr_rwlock);
 			ret = zocl_load_sect(zdev, axlf, xclbin,
-			    BITSTREAM_PARTIAL_PDI);
+			    BITSTREAM_PARTIAL_PDI, domain);
 			write_lock(&zdev->attr_rwlock);
 			if (ret)
 				goto out0;
 
 			write_unlock(&zdev->attr_rwlock);
-			ret = zocl_load_sect(zdev, axlf, xclbin, PDI);
+			ret = zocl_load_sect(zdev, axlf, xclbin, PDI, domain);
 			write_lock(&zdev->attr_rwlock);
 			if (ret)
 				goto out0;
@@ -887,7 +986,7 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 		if (ret)
 			goto out0;
 
-		zocl_cache_xclbin(zdev, axlf, xclbin);
+		zocl_cache_xclbin(domain, axlf, xclbin);
 	} else if ((axlf_obj->za_flags & DRM_ZOCL_PLATFORM_FLAT) &&
 		   axlf_head.m_header.m_mode == XCLBIN_FLAT &&
 		   axlf_head.m_header.m_mode != XCLBIN_HW_EMU &&
@@ -897,7 +996,7 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 		 * and xclbin has full bitstream and its not hw emulation
 		 */
 		write_unlock(&zdev->attr_rwlock);
-		ret = zocl_load_sect(zdev, axlf, xclbin, BITSTREAM);
+		ret = zocl_load_sect(zdev, axlf, xclbin, BITSTREAM, domain);
 		write_lock(&zdev->attr_rwlock);
 		if (ret)
 			goto out0;
@@ -905,37 +1004,39 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 
 	/* Populating IP_LAYOUT sections */
 	/* zocl_read_sect return size of section when successfully find it */
-	size = zocl_read_sect(IP_LAYOUT, &zdev->ip, axlf, xclbin);
+	size = zocl_read_sect(IP_LAYOUT, &domain->ip, axlf, xclbin);
 	if (size <= 0) {
 		if (size != 0) {
 			ret = size;
 			goto out0;
 		}
-	} else if (sizeof_section(zdev->ip, m_ip_data) != size) {
+	} else if (sizeof_section(domain->ip, m_ip_data) != size) {
 		ret = -EINVAL;
 		goto out0;
 	}
 
 	/* Populating DEBUG_IP_LAYOUT sections */
-	size = zocl_read_sect(DEBUG_IP_LAYOUT, &zdev->debug_ip, axlf, xclbin);
+	size = zocl_read_sect(DEBUG_IP_LAYOUT, &domain->debug_ip, axlf, xclbin);
 	if (size <= 0) {
 		if (size != 0) {
 			ret = size;
 			goto out0;
 		}
-	} else if (sizeof_section(zdev->debug_ip, m_debug_ip_data) != size) {
+	} else if (sizeof_section(domain->debug_ip, m_debug_ip_data) != size) {
 		ret = -EINVAL;
 		goto out0;
 	}
 
-	ret = zocl_update_apertures(zdev);
+	ret = zocl_update_apertures(zdev, domain);
 	if (ret)
 		goto out0;
 
-	if (zdev->kernels != NULL) {
-		vfree(zdev->kernels);
-		zdev->kernels = NULL;
-		zdev->ksize = 0;
+	/* SAIF TODO : Need to discuss about the kernels. Currently considering
+	 * it as a domain specific. */
+	if (domain->kernels != NULL) {
+		vfree(domain->kernels);
+		domain->kernels = NULL;
+		domain->ksize = 0;
 	}
 
 	if (axlf_obj->za_ksize > 0) {
@@ -949,44 +1050,45 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 			ret = -EFAULT;
 			goto out0;
 		}
-		zdev->ksize = axlf_obj->za_ksize;
-		zdev->kernels = kernels;
+		domain->ksize = axlf_obj->za_ksize;
+		domain->kernels = kernels;
 	}
 
 	/* Populating AIE_METADATA sections */
-	size = zocl_read_sect(AIE_METADATA, &zdev->aie_data.data, axlf, xclbin);
+	size = zocl_read_sect(AIE_METADATA, &domain->aie_data.data, axlf,
+			     xclbin);
 	if (size < 0) {
 		ret = size;
 		goto out0;
 	}
-	zdev->aie_data.size = size;
+	domain->aie_data.size = size;
 
 	/* Populating CONNECTIVITY sections */
-	size = zocl_read_sect(CONNECTIVITY, &zdev->connectivity, axlf, xclbin);
+	size = zocl_read_sect(CONNECTIVITY, &domain->connectivity, axlf, xclbin);
 	if (size <= 0) {
 		if (size != 0) {
 			ret = size;
 			goto out0;
 		}
-	} else if (sizeof_section(zdev->connectivity, m_connection) != size) {
+	} else if (sizeof_section(domain->connectivity, m_connection) != size) {
 		ret = -EINVAL;
 		goto out0;
 	}
 
 	/* Populating MEM_TOPOLOGY sections */
-	size = zocl_read_sect(MEM_TOPOLOGY, &zdev->topology, axlf, xclbin);
+	size = zocl_read_sect(MEM_TOPOLOGY, &domain->topology, axlf, xclbin);
 	if (size <= 0) {
 		if (size != 0) {
 			ret = size;
 			goto out0;
 		}
-	} else if (sizeof_section(zdev->topology, m_mem_data) != size) {
+	} else if (sizeof_section(domain->topology, m_mem_data) != size) {
 		ret = -EINVAL;
 		goto out0;
 	}
 
-	zocl_clear_mem(zdev);
-	zocl_init_mem(zdev, zdev->topology);
+	zocl_clear_mem_domain(zdev, domain->domain_idx);
+	zocl_init_mem(zdev, domain);
 
 	/* Createing AIE Partition */
 	write_unlock(&zdev->attr_rwlock);
@@ -996,8 +1098,8 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 	/*
 	 * Remember xclbin_uuid for opencontext.
 	 */
-	zdev->zdev_xclbin->zx_refcnt = 0;
-	zocl_xclbin_set_uuid(zdev, &axlf_head.m_header.uuid);
+	domain->zdev_xclbin->zx_refcnt = 0;
+	zocl_xclbin_set_uuid(domain->zdev_xclbin, &axlf_head.m_header.uuid);
 
 	if (kds_mode == 1) {
 		/*
@@ -1030,11 +1132,11 @@ out0:
 }
 
 void *
-zocl_xclbin_get_uuid(struct drm_zocl_dev *zdev)
+zocl_xclbin_get_uuid(struct drm_zocl_domain *domain)
 {
-	BUG_ON(!mutex_is_locked(&zdev->zdev_xclbin_lock));
+	BUG_ON(!mutex_is_locked(&domain->zdev_xclbin_lock));
 
-	return zdev->zdev_xclbin->zx_uuid;
+	return domain->zdev_xclbin->zx_uuid;
 }
 
 int
@@ -1186,9 +1288,9 @@ zocl_aie_free_ctx(struct drm_zocl_dev *zdev, struct drm_zocl_ctx *ctx,
 }
 
 int
-zocl_xclbin_set_uuid(struct drm_zocl_dev *zdev, void *uuid)
+zocl_xclbin_set_uuid(struct zocl_xclbin *zdev_xclbin, void *uuid)
 {
-	xuid_t *zx_uuid = zdev->zdev_xclbin->zx_uuid;
+	xuid_t *zx_uuid = zdev_xclbin->zx_uuid;
 
 	if (zx_uuid) {
 		vfree(zx_uuid);
@@ -1200,34 +1302,40 @@ zocl_xclbin_set_uuid(struct drm_zocl_dev *zdev, void *uuid)
 		return -ENOMEM;
 
 	uuid_copy(zx_uuid, uuid);
-	zdev->zdev_xclbin->zx_uuid = zx_uuid;
+	zdev_xclbin->zx_uuid = zx_uuid;
 	return 0;
 }
 
 int
-zocl_xclbin_init(struct drm_zocl_dev *zdev)
+zocl_xclbin_init(struct zocl_xclbin *zdev_xclbin)
 {
-	zdev->zdev_xclbin = vmalloc(sizeof(struct zocl_xclbin));
+	zdev_xclbin = vmalloc(sizeof(struct zocl_xclbin));
 	if (!zdev->zdev_xclbin) {
 		DRM_ERROR("Alloc zdev_xclbin failed: no memory\n");
 		return -ENOMEM;
 	}
 
-	zdev->zdev_xclbin->zx_refcnt = 0;
-	zdev->zdev_xclbin->zx_uuid = NULL;
+	zdev_xclbin->zx_refcnt = 0;
+	zdev_xclbin->zx_uuid = NULL;
 
 	return 0;
 }
-void
-zocl_xclbin_fini(struct drm_zocl_dev *zdev)
-{
-	vfree(zdev->zdev_xclbin->zx_uuid);
-	zdev->zdev_xclbin->zx_uuid = NULL;
-	vfree(zdev->zdev_xclbin);
-	zdev->zdev_xclbin = NULL;
 
+void
+zocl_xclbin_fini(struct zocl_xclbin *zdev_xclbin)
+{
+	vfree(zdev_xclbin->zx_uuid);
+	zdev_xclbin->zx_uuid = NULL;
+	vfree(zdev_xclbin);
+	zdev_xclbin = NULL;
+
+	/* SAIF TODO : Why we need to destroy CU here
+	 * Move it to other place
+	 */
+#if 0
 	/* Delete CU devices if exist */
 	subdev_destroy_cu(zdev);
+#endif
 }
 
 bool

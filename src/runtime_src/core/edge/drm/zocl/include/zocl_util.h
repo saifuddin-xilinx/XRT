@@ -27,9 +27,12 @@
 #define _8KB	0x2000
 #define _64KB	0x10000
 
-#define MAX_CU_NUM     128
-#define CU_SIZE        _64KB
-#define PR_ISO_SIZE    _4KB
+#define MAX_PR_DOMAIN_NUM	32
+#define MAX_CU_NUM		128
+/* Apertures contains both ip and debug ip information */
+#define MAX_APT_NUM		2*MAX_CU_NUM
+#define CU_SIZE			_64KB
+#define PR_ISO_SIZE		_4KB
 
 #define CLEAR(x) \
 	memset(&x, 0, sizeof(x))
@@ -45,9 +48,13 @@
 
 /*
  * Get the bank index from BO creation flags.
- * bits  0 ~ 15: DDR BANK index
+ * bits  0 ~ 10	: DDR BANK index
+ * bits  11 ~ 15: Domain index
  */
-#define	GET_MEM_BANK(x)		((x) & 0xFFFF)
+#define MEM_BANK_SHIFT_BIT	11
+#define	GET_MEM_INDEX(x)	((x) & 0xFFFF)
+#define	GET_DOMAIN_INDEX(x)	(((x) >> MEM_BANK_SHIFT_BIT) & 0x7FF)
+#define SET_MEM_INDEX(x, y)	(((x) << MEM_BANK_SHIFT_BIT) | y)
 
 #define ZOCL_GET_ZDEV(ddev) (ddev->dev_private)
 
@@ -61,6 +68,7 @@ struct addr_aperture {
 	size_t		size;
 	u32		prop;
 	int		cu_idx;
+	int		domain_idx;
 };
 
 enum zocl_mem_type {
@@ -75,13 +83,13 @@ enum zocl_mem_type {
  * the memory topology in xclbin.
  */
 struct zocl_mem {
+	u32			zm_mem_idx;
 	enum zocl_mem_type	zm_type;
 	unsigned int		zm_used;
 	u64			zm_base_addr;
 	u64			zm_size;
 	struct drm_zocl_mm_stat zm_stat;
-	struct drm_mm          *zm_mm;    /* DRM MM node for PL-DDR */
-	struct list_head 	zm_mm_list;
+	struct list_head	link;
 };
 
 /*
@@ -97,6 +105,27 @@ struct aie_metadata {
 	void *data;
 };
 
+struct drm_zocl_domain {
+	int			 domain_idx;
+	struct mem_topology	*topology;
+	struct ip_layout	*ip;
+	struct debug_ip_layout	*debug_ip;
+	struct connectivity	*connectivity;
+	struct axlf             *axlf;
+	size_t                   axlf_size;
+	struct aie_metadata	 aie_data;
+	int			 ksize;
+	char			*kernels;
+
+	u64			 pr_isolation_addr;
+	u16			 pr_isolation_freeze;
+	u16			 pr_isolation_unfreeze;
+	int			 partial_overlay_id;
+
+	struct zocl_xclbin	*zdev_xclbin;
+	struct mutex		 zdev_xclbin_lock;
+};
+
 struct drm_zocl_dev {
 	struct drm_device       *ddev;
 	struct fpga_manager     *fpga_mgr;
@@ -109,21 +138,17 @@ struct drm_zocl_dev {
 	unsigned int		 cu_num;
 	unsigned int             irq[MAX_CU_NUM];
 	struct sched_exec_core  *exec;
-	unsigned int		 num_mem;
+	/* Saif TODO : Hopefully this is not required */
+	//unsigned int		 num_mem;
+	struct list_head	 zm_list_head;
 	struct zocl_mem		*mem;
+	struct drm_mm           *zm_drm_mm;    /* DRM MM node for PL-DDR */
 	struct mutex		 mm_lock;
 	struct mutex		 aie_lock;
 
 	struct list_head	 ctx_list;
 
-	struct mem_topology	*topology;
-	struct ip_layout	*ip;
-	struct debug_ip_layout	*debug_ip;
-	struct connectivity	*connectivity;
 	struct addr_aperture	*apertures;
-	struct axlf             *axlf;
-	size_t                   axlf_size;
-	struct aie_metadata	 aie_data;
 	unsigned int		 num_apts;
 
 	struct kds_sched	 kds;
@@ -137,26 +162,21 @@ struct drm_zocl_dev {
 	 * hold read lock; And all write functions which not atomically
 	 * touch those attributes should hold write lock.
 	 */
-	rwlock_t		attr_rwlock;
+	rwlock_t		 attr_rwlock;
 
 	struct soft_krnl	*soft_kernel;
 	struct aie_info		*aie_information;
 	struct dma_chan		*zdev_dma_chan;
 	struct mailbox		*zdev_mailbox;
 	const struct zdev_data	*zdev_data_info;
-	u64			pr_isolation_addr;
-	struct zocl_xclbin	*zdev_xclbin;
-	struct mutex		zdev_xclbin_lock;
 	struct generic_cu	*generic_cu;
-	int			 ksize;
-	char			*kernels;
-	struct zocl_error	zdev_error;
+	struct zocl_error	 zdev_error;
 	struct zocl_aie		*aie;
 	struct zocl_watchdog_dev *watchdog;
-	u16			pr_isolation_freeze;
-	u16			pr_isolation_unfreeze;
-	int 			partial_overlay_id;
-	int			full_overlay_id;
+
+	int			 num_pr_domain;
+	int			 full_overlay_id;
+	struct drm_zocl_domain	*pr_domain[MAX_PR_DOMAIN_NUM];
 };
 
 int zocl_kds_update(struct drm_zocl_dev *zdev, struct drm_zocl_kds *cfg);

@@ -1057,24 +1057,29 @@ static bool check_for_reserved_memory(uint64_t start_addr, size_t size)
  * PL-DDR and LPDDR are managed by DRM MM Range Allocator;
  * CMA is managed by DRM CMA Allocator.
  */
-void zocl_init_mem(struct drm_zocl_dev *zdev, struct mem_topology *mtopo)
+void zocl_init_mem(struct drm_zocl_dev *zdev, struct drm_zocl_domain *domain)
 {
 	struct zocl_mem *memp;
+	struct mem_topology *mtopo = domain->topology;
 	int i, j;
+	uint64_t mm_start_addr = 0;
+	uint64_t mm_end_addr = 0;
 
 	if (!mtopo)
 		return;
 
-	zdev->num_mem = mtopo->m_count;
-	zdev->mem = vzalloc(zdev->num_mem * sizeof(struct zocl_mem));
+	mutex_lock(&zdev->mm_lock);
+	/* Initialize with max and min possible value */
+	mm_start_addr = 0xffffFFFFffffFFFF;
+	mm_end_addr = 0;
 
-	for (i = 0; i < zdev->num_mem; i++) {
+	for (i = 0; i < mtopo->m_count; i++) {
 		struct mem_data *md = &mtopo->m_mem_data[i];
 
 		if (!md->m_used)
 			continue;
 
-		memp = &zdev->mem[i];
+		memp = vzalloc(sizeof(struct zocl_mem));
 		if (md->m_type == MEM_STREAMING) {
 			memp->zm_type = ZOCL_MEM_TYPE_STREAMING;
 			continue;
@@ -1084,8 +1089,8 @@ void zocl_init_mem(struct drm_zocl_dev *zdev, struct mem_topology *mtopo)
 		/* In mem_topology, size is in KB */
 		memp->zm_size = md->m_size * 1024;
 		memp->zm_used = 1;
-		INIT_LIST_HEAD(&memp->zm_mm_list);
-
+		memp->zm_mem_idx = SET_MEM_INDEX(domain->domain_idx, i);
+		list_add_tail(&zdev->zm_list_head, &memp->link);
 
 		if (!check_for_reserved_memory(memp->zm_base_addr, memp->zm_size)) {
 			DRM_INFO("Memory %d is not reserved in device tree."
@@ -1094,12 +1099,27 @@ void zocl_init_mem(struct drm_zocl_dev *zdev, struct mem_topology *mtopo)
 			continue;
 		}
 
-		memp->zm_mm = vzalloc(sizeof(struct drm_mm));
+                /* Update the start and end address for the memory manager */
+                if (memp->zm_base_addr < mm_start_addr)
+                        mm_start_addr = memp->zm_base_addr;
+                if ((memp->zm_base_addr + memp->zm_size) > mm_end_addr)
+                        mm_end_addr = memp->zm_base_addr + memp->zm_size;
+
 		memp->zm_type = ZOCL_MEM_TYPE_RANGE_ALLOC;
-	
-		drm_mm_init(memp->zm_mm, memp->zm_base_addr, memp->zm_size);
 	}
 
+	/* Initialize drm memory manager if not yet done */
+	if (!memp->zm_mm) {
+		/* Initialize a single drm memory manager for whole memory
+		 * available for this device.
+		 */
+		memp->zm_mm = vzalloc(sizeof(struct drm_mm));
+		drm_mm_init(memp->zm_mm, memp->zm_base_addr,
+			    (mm_end_addr - mm_start_addr));
+	}
+
+	/* SAIF TODO : This need to rethink */
+#if 0
 	/* Create a link list for similar memory manager */
 	for (i = 0; i < zdev->num_mem; i++) {
 		memp = &zdev->mem[i];
@@ -1110,36 +1130,61 @@ void zocl_init_mem(struct drm_zocl_dev *zdev, struct mem_topology *mtopo)
 			if ((i == j) || !mtopo->m_mem_data[j].m_used)
 				continue;
 
-			if (strcmp(mtopo->m_mem_data[i].m_tag, mtopo->m_mem_data[j].m_tag) && 
+			if (strcmp(mtopo->m_mem_data[i].m_tag, mtopo->m_mem_data[j].m_tag) &&
 					list_empty(&zdev->mem[j].zm_mm_list)) {
 				list_add_tail(&zdev->mem[j].zm_mm_list, &memp->zm_mm_list);
 				memp = &zdev->mem[j];
 			}
 		}
 	}
+#endif
+	mutex_unlock(&zdev->mm_lock);
+
+}
+
+void zocl_clear_mem_domain(struct drm_zocl_dev *zdev, int domain_idx)
+{
+	struct zocl_mem *curr_mem;
+	struct zocl_mem *next;
+
+	mutex_lock(&zdev->mm_lock);
+	if (list_empty(&zdev->zm_list_head))
+		goto done;
+
+	list_for_each_entry_safe(curr_mem, next, &zdev->zm_list_head, link) {
+		if (domain_idx != GET_DOMAIN_INDEX(curr_mem->zm_mem_idx))
+			continue;
+
+		list_del(&curr_mem->link);
+		vfree(curr_mem);
+	}
+
+done:
+	mutex_unlock(&zdev->mm_lock);
+
 }
 
 void zocl_clear_mem(struct drm_zocl_dev *zdev)
 {
-	int i;
+	struct zocl_mem *curr_mem;
+	struct zocl_mem *next;
 
 	if (!zdev->mem)
 		return;
 
 	mutex_lock(&zdev->mm_lock);
 
-	for (i = 0; i < zdev->num_mem; i++) {
-		struct zocl_mem *md = &zdev->mem[i];
-
-		if (md->zm_mm) {
-			drm_mm_takedown(md->zm_mm);
-			vfree(md->zm_mm);
-		}
+	list_for_each_entry_safe(curr_mem, next, &zdev->zm_list_head, link) {
+		list_del(&curr_mem->link);
+		vfree(curr_mem);
 	}
 
-	vfree(zdev->mem);
+	if (zdev->zm_drm_mm) {
+		drm_mm_takedown(zdev->zm_drm_mm);
+		vfree(md->zm_drm_mm);
+	}
+
 	zdev->mem = NULL;
-	zdev->num_mem = 0;
 
 	mutex_unlock(&zdev->mm_lock);
 }
