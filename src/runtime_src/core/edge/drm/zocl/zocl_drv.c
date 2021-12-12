@@ -59,31 +59,6 @@ static const struct vm_operations_struct reg_physical_vm_ops = {
 #endif
 };
 
-void zocl_free_sections(struct drm_zocl_dev *zdev)
-{
-	if (zdev->ip) {
-		vfree(zdev->ip);
-		CLEAR(zdev->ip);
-	}
-	if (zdev->debug_ip) {
-		vfree(zdev->debug_ip);
-		CLEAR(zdev->debug_ip);
-	}
-	if (zdev->connectivity) {
-		vfree(zdev->connectivity);
-		CLEAR(zdev->connectivity);
-	}
-	if (zdev->topology) {
-		vfree(zdev->topology);
-		CLEAR(zdev->topology);
-	}
-	if (zdev->axlf) {
-		vfree(zdev->axlf);
-		CLEAR(zdev->axlf);
-		zdev->axlf_size = 0;
-	}
-}
-
 #if KERNEL_VERSION(5, 3, 0) <= LINUX_VERSION_CODE
 static int
 match_name(struct device *dev, const void *data)
@@ -99,6 +74,132 @@ match_name(struct device *dev, void *data)
 	 */
 	return strstr(dev_name(dev), name) != NULL;
 }
+
+/**
+ * zocl_pr_domain_init : PR Slot specific initialization
+ *
+ * @zdev: zocl device struct
+ * @pdev: platform device struct
+ *
+ * Returns 0 if initialization successfully.
+ * Returns -EINVAL if failed.
+ */
+
+static int zocl_pr_domain_init(struct drm_zocl_dev *zdev,
+		                       struct platform_device *pdev)
+{
+	struct drm_zocl_domain *zocl_domain = NULL;
+	int ret;
+	int i;
+
+
+	/* SAIF TODO : Need to update this function based on the device tree */
+	if (ZOCL_PLATFORM_ARM64) {
+		u64 pr_num;
+		if (of_property_read_u64(pdev->dev.of_node,
+					 "xlnx,pr-num-support", &pr_num))
+			zdev->num_pr_domain = (int)pr_num;
+	} else {
+		u32 pr_num;
+		if (of_property_read_u32(pdev->dev.of_node,
+				 "xlnx,pr-num-support", &pr_num))
+			zdev->num_pr_domain = (int)pr_num;
+	}
+
+	for (i = 0; i < zdev->num_pr_domain; i++) {
+		zocl_domain = (struct drm_zocl_domain *)
+			kzalloc(sizeof(struct drm_zocl_domain), GFP_KERNEL);
+		if (!zocl_domain)
+			return -ENOMEM;
+
+		/* Initial xclbin */
+		ret = zocl_xclbin_init(zocl_domain->zdev_xclbin);
+		if (ret)
+			return ret;
+
+		mutex_init(&zocl_domain->zdev_xclbin_lock);
+
+		if (ZOCL_PLATFORM_ARM64) {
+			zocl_domain->pr_isolation_freeze = 0x0;
+			zocl_domain->pr_isolation_unfreeze = 0x3;
+			if (of_property_read_u64(pdev->dev.of_node,
+					"xlnx,pr-isolation-addr",
+					&zocl_domain->pr_isolation_addr))
+				zocl_domain->pr_isolation_addr = 0;
+			if (of_property_read_bool(pdev->dev.of_node,
+						  "xlnx,pr-decoupler")) {
+				zocl_domain->pr_isolation_freeze = 0x1;
+				zocl_domain->pr_isolation_unfreeze = 0x0;
+			}
+		} else {
+			u32 prop_addr = 0;
+
+			if (of_property_read_u32(pdev->dev.of_node,
+						 "xlnx,pr-isolation-addr",
+						 &prop_addr))
+				zocl_domain->pr_isolation_addr = 0;
+			else
+				zocl_domain->pr_isolation_addr = prop_addr;
+		}
+
+		DRM_INFO("PR[%d] Isolation addr 0x%llx", i,
+			 zocl_domain->pr_isolation_addr);
+
+		zocl_domain->partial_overlay_id = -1;
+
+		zdev->pr_domain[i] = zocl_domain;
+	}
+
+	zdev->full_overlay_id  = -1;
+
+	return 0;
+}
+
+/**
+ * zocl_pr_domain_fini : PR Slot specific Cleanup
+ *
+ * @zdev: zocl device struct
+ *
+ */
+static void zocl_pr_domain_fini(struct drm_zocl_dev *zdev)
+{
+	struct drm_zocl_domain *zocl_domain = NULL;
+	int i;
+
+	for (i = 0; i < zdev->num_pr_domain; i++) {
+		zocl_domain = zdev->pr_domain[i];
+		if (zocl_domain) {
+			mutex_destroy(&zocl_domain->zdev_xclbin_lock);
+			zocl_xclbin_fini(zocl_domain->zdev_xclbin);
+			vfree(zocl_domain);
+			zdev->pr_domain[i] = NULL;
+		}
+	}
+}
+
+static int zocl_aperture_init(struct drm_zocl_dev *zdev)
+{
+	zdev->apertures = kcalloc(MAX_APT_NUM, sizeof(struct addr_aperture),
+				 GFP_KERNEL);
+	if (!zdev->apertures) {
+		DRM_ERROR("Out of memory for Aperture\n");
+		return -ENOMEM;
+	}
+
+	zdev->num_apts = 0;
+
+	return 0;
+}
+
+static void zocl_aperture_fini(struct drm_zocl_dev *zdev)
+{
+	/* Free aperture memory */
+	if (zdev->apertures)
+		vfree(zdev->apertures);
+
+	zdev->apertures = NULL;
+}
+
 
 /**
  * get_reserved_mem_region - Get reserved memory region
@@ -292,6 +393,7 @@ void subdev_destroy_cu(struct drm_zocl_dev *zdev)
 	for (i = 0; i < MAX_CU_NUM; ++i) {
 		if (!zdev->cu_pldev[i])
 			continue;
+
 		platform_device_del(zdev->cu_pldev[i]);
 		platform_device_put(zdev->cu_pldev[i]);
 		zdev->cu_pldev[i] = NULL;
@@ -788,7 +890,10 @@ static int zocl_drm_platform_probe(struct platform_device *pdev)
 		zdev->host_mem = res_mem.start;
 		zdev->host_mem_len = resource_size(&res_mem);
 	}
+
 	mutex_init(&zdev->mm_lock);
+	/* Initialize zocl memory head */
+	INIT_LIST_HEAD(&zdev->zm_list_head);
 
 	subdev = zocl_find_pdev("ert_hw");
 	if (subdev) {
@@ -836,30 +941,15 @@ static int zocl_drm_platform_probe(struct platform_device *pdev)
 		of_node_put(fnode);
 	}
 
-	if (ZOCL_PLATFORM_ARM64) {
-		zdev->pr_isolation_freeze = 0x0;
-		zdev->pr_isolation_unfreeze = 0x3;
-		if (of_property_read_u64(pdev->dev.of_node,
-		    "xlnx,pr-isolation-addr", &zdev->pr_isolation_addr))
-			zdev->pr_isolation_addr = 0;
-		if (of_property_read_bool(pdev->dev.of_node,
-		    "xlnx,pr-decoupler")) {
-			zdev->pr_isolation_freeze = 0x1;
-			zdev->pr_isolation_unfreeze = 0x0;
-		}
-	} else {
-		u32 prop_addr = 0;
+	/* Initialize Aperture */
+	ret = zocl_aperture_init(zdev);
+	if (ret)
+		goto err_apt;
 
-		if (of_property_read_u32(pdev->dev.of_node,
-		    "xlnx,pr-isolation-addr", &prop_addr))
-			zdev->pr_isolation_addr = 0;
-		else
-			zdev->pr_isolation_addr = prop_addr;
-	}
-	DRM_INFO("PR Isolation addr 0x%llx", zdev->pr_isolation_addr);
-
-	zdev->partial_overlay_id = -1;
-	zdev->full_overlay_id  = -1;
+	/* SAIF TODO */
+	ret = zocl_pr_domain_init(zdev, pdev);
+	if (ret)
+		goto err_drm;
 
 	/* Initialzie IOMMU */
 	if (iommu_present(&platform_bus_type)) {
@@ -885,21 +975,17 @@ static int zocl_drm_platform_probe(struct platform_device *pdev)
 
 	/* Create and register DRM device */
 	drm = drm_dev_alloc(&zocl_driver, &pdev->dev);
-	if (IS_ERR(drm))
-		return PTR_ERR(drm);
+	if (IS_ERR(drm)) {
+		ret = PTR_ERR(drm);
+		goto err_drm;
+	}
 
 	ret = drm_dev_register(drm, 0);
 	if (ret)
-		goto err_drm;
+		goto err_sysfs;
 
 	/* During attach, we don't request dma channel */
 	zdev->zdev_dma_chan = NULL;
-
-	/* Initial xclbin */
-	ret = zocl_xclbin_init(zdev);
-	if (ret)
-		goto err_drm;
-	mutex_init(&zdev->zdev_xclbin_lock);
 
 	/* doen with zdev initialization */
 	drm->dev_private = zdev;
@@ -937,10 +1023,11 @@ err_err:
 	mutex_destroy(&zdev->aie_lock);
 	zocl_fini_error(zdev);
 err_sysfs:
-	zocl_xclbin_fini(zdev);
-	mutex_destroy(&zdev->zdev_xclbin_lock);
-err_drm:
 	ZOCL_DRM_DEV_PUT(drm);
+err_drm:
+	zocl_pr_domain_fini(zdev);
+err_apt:
+	zocl_aperture_fini(zdev);
 	return ret;
 }
 
@@ -970,8 +1057,7 @@ static int zocl_drm_platform_remove(struct platform_device *pdev)
 	zocl_clear_mem(zdev);
 	mutex_destroy(&zdev->mm_lock);
 	zocl_free_sections(zdev);
-	zocl_xclbin_fini(zdev);
-	mutex_destroy(&zdev->zdev_xclbin_lock);
+	zocl_pr_domain_fini(zdev);
 	zocl_destroy_aie(zdev);
 	mutex_destroy(&zdev->aie_lock);
 	zocl_fini_sysfs(drm->dev);

@@ -19,8 +19,8 @@ struct zocl_xclbin {
 	void		*zx_uuid;
 };
 
-int zocl_xclbin_init(struct drm_zocl_dev *zdev);
-void zocl_xclbin_fini(struct drm_zocl_dev *zdev);
+int zocl_xclbin_init(struct zocl_xclbin *zdev_xclbin);
+void zocl_xclbin_fini(struct zocl_xclbin *zdev_xclbin);
 
 int zocl_xclbin_set_uuid(struct drm_zocl_dev *zdev, void *uuid);
 void *zocl_xclbin_get_uuid(struct drm_zocl_dev *zdev);
