@@ -289,11 +289,11 @@ get_next_free_apt_index(struct drm_zocl_dev *zdev)
 	for (apt_idx = 0; apt_idx < MAX_APT_NUM; ++apt_idx) {
 		/* If phy_addr doesn't have any non zero address,
 		 * consider it as free index */
-		if (zdev->apertures[apt_idx].phy_addr == 0)
+		if (zdev->apertures[apt_idx].addr == 0)
 			return apt_idx;
 	}
 
-	return -EINVAL;
+	return -ENOSPC;
 }
 
 static void
@@ -303,7 +303,7 @@ update_max_apt_number(struct drm_zocl_dev *zdev)
 
 	zdev->num_apts = 0;
 	for (apt_idx = 0; apt_idx < MAX_APT_NUM; ++apt_idx) {
-		if (zdev->apertures[apt_idx].phy_addr != 0)
+		if (zdev->apertures[apt_idx].addr != 0)
 			zdev->num_apts = apt_idx;
 	}
 }
@@ -315,7 +315,7 @@ zocl_clean_aperture(struct drm_zocl_dev *zdev, int domain_idx)
 	struct addr_aperture *apt;
 
 	for (apt_idx = 0; apt_idx < MAX_APT_NUM; ++apt_idx) {
-		apt = zdev->apertures[apt_idx];
+		apt = &zdev->apertures[apt_idx];
 		if (apt->domain_idx == domain_idx) {
 			/* Reset this aperture index */
 			apt->addr = 0;
@@ -342,6 +342,7 @@ zocl_update_apertures(struct drm_zocl_dev *zdev, struct drm_zocl_domain *domain)
 	struct debug_ip_data *dbg_ip;
 	struct addr_aperture *apt;
 	int total = 0;
+	int apt_idx;
 	int i;
 
 	/* Update aperture should only happen when loading xclbin */
@@ -372,7 +373,7 @@ zocl_update_apertures(struct drm_zocl_dev *zdev, struct drm_zocl_domain *domain)
 				DRM_ERROR("No more free apertures\n");
 				return -EINVAL;
 			}
-			apt = zdev->apertures[apt_idx];
+			apt = &zdev->apertures[apt_idx];
 
 			apt->addr = ip->m_base_address;
 			apt->size = CU_SIZE;
@@ -392,7 +393,7 @@ zocl_update_apertures(struct drm_zocl_dev *zdev, struct drm_zocl_domain *domain)
 				DRM_ERROR("No more free apertures\n");
 				return -EINVAL;
 			}
-			apt = zdev->apertures[apt_idx];
+			apt = &zdev->apertures[apt_idx];
 
 			apt->addr = dbg_ip->m_base_address;
 			apt->domain_idx = domain->domain_idx;
@@ -414,7 +415,41 @@ zocl_update_apertures(struct drm_zocl_dev *zdev, struct drm_zocl_domain *domain)
 }
 
 static int
-zocl_create_cu(struct drm_zocl_dev *zdev)
+zocl_get_cu_inst_idx(struct drm_zocl_dev *zdev)
+{
+	int i;
+
+	/* SAIF TODO : Didn't think about efficient way till now */
+	for (i = 0; i < MAX_CU_NUM; ++i)
+		if (zdev->cu_pldev[i] == NULL)
+			return i;
+
+	return -ENOSPC;
+}
+
+static void
+zocl_destroy_cu_domain(struct drm_zocl_dev *zdev, int domain_idx)
+{
+	struct platform_device *pldev;
+	struct xrt_cu_info *info;
+	int i;
+
+	for (i = 0; i < MAX_CU_NUM; ++i) {
+		pldev = zdev->cu_pldev[i];
+		if (!pldev)
+			continue;
+
+		info = dev_get_platdata(&pldev->dev);
+		if (info->domain_idx == domain_idx) {
+			platform_device_del(pldev);
+			platform_device_put(pldev);
+			zdev->cu_pldev[i] = NULL;
+		}
+	}
+}
+
+static int
+zocl_create_cu(struct drm_zocl_dev *zdev, struct drm_zocl_domain *domain)
 {
 	struct ip_data *ip;
 	struct xrt_cu_info info;
@@ -423,11 +458,11 @@ zocl_create_cu(struct drm_zocl_dev *zdev)
 	int err;
 	int i;
 
-	if (!zdev->ip)
+	if (!domain->ip)
 		return 0;
 
-	for (i = 0; i < zdev->ip->m_count; ++i) {
-		ip = &zdev->ip->m_ip_data[i];
+	for (i = 0; i < domain->ip->m_count; ++i) {
+		ip = &domain->ip->m_ip_data[i];
 
 		if (ip->m_type != IP_KERNEL)
 			continue;
@@ -436,6 +471,7 @@ zocl_create_cu(struct drm_zocl_dev *zdev)
 		if (ip->m_base_address == -1)
 			continue;
 
+		info.domain_idx = domain->domain_idx;
 		info.num_res = 1;
 		info.addr = ip->m_base_address;
 		info.intr_enable = xclbin_intr_enable(ip->properties);
@@ -455,7 +491,7 @@ zocl_create_cu(struct drm_zocl_dev *zdev)
 			return -EINVAL;
 		}
 
-		info.inst_idx = i;
+		info.inst_idx = zocl_get_cu_inst_idx(zdev);
 		/* ip_data->m_name format "<kernel name>:<instance name>",
 		 * where instance name is so called CU name.
 		 */
@@ -497,7 +533,8 @@ zocl_xclbin_same_uuid(struct drm_zocl_domain *domain, xuid_t *uuid)
  * XRT driver. Only if the same XCLBIN has been loaded, we skip loading.
  */
 int
-zocl_xclbin_load_pdi(struct drm_zocl_dev *zdev, void *data)
+zocl_xclbin_load_pdi(struct drm_zocl_dev *zdev, void *data,
+		    struct drm_zocl_domain *domain)
 {
 	struct axlf *axlf = data;
 	struct axlf *axlf_head = axlf;
@@ -514,12 +551,12 @@ zocl_xclbin_load_pdi(struct drm_zocl_dev *zdev, void *data)
 		return -EINVAL;
 	}
 
-	mutex_lock(&zdev->zdev_xclbin_lock);
+	mutex_lock(&domain->zdev_xclbin_lock);
 	/* Check unique ID */
-	if (zocl_xclbin_same_uuid(zdev, &axlf_head->m_header.uuid)) {
+	if (zocl_xclbin_same_uuid(domain, &axlf_head->m_header.uuid)) {
 		DRM_INFO("%s The XCLBIN already loaded, uuid: %pUb",
 			 __func__, &axlf_head->m_header.uuid);
-		mutex_unlock(&zdev->zdev_xclbin_lock);
+		mutex_unlock(&domain->zdev_xclbin_lock);
 		return ret;
 	}
 
@@ -540,7 +577,7 @@ zocl_xclbin_load_pdi(struct drm_zocl_dev *zdev, void *data)
 	    axlf, xclbin);
 	if (size > 0) {
 		write_unlock(&zdev->attr_rwlock);
-		ret = zocl_load_partial(zdev, section_buffer, size);
+		ret = zocl_load_partial(zdev, section_buffer, size, domain);
 		write_lock(&zdev->attr_rwlock);
 		if (ret)
 			goto out;
@@ -549,7 +586,7 @@ zocl_xclbin_load_pdi(struct drm_zocl_dev *zdev, void *data)
 	size = zocl_offsetof_sect(PDI, &section_buffer, axlf, xclbin);
 	if (size > 0) {
 		write_unlock(&zdev->attr_rwlock);
-		ret = zocl_load_partial(zdev, section_buffer, size);
+		ret = zocl_load_partial(zdev, section_buffer, size, domain);
 		write_lock(&zdev->attr_rwlock);
 		if (ret)
 			goto out;
@@ -563,14 +600,15 @@ zocl_xclbin_load_pdi(struct drm_zocl_dev *zdev, void *data)
 	}
 
 	/* preserve uuid, avoid double download */
-	zocl_xclbin_set_uuid(zdev, &axlf_head->m_header.uuid);
+	zocl_xclbin_set_uuid(domain, &axlf_head->m_header.uuid);
 
 	/* no need to reset scheduler, config will always reset scheduler */
 
 out:
 	write_unlock(&zdev->attr_rwlock);
-	DRM_INFO("%s %pUb ret: %d", __func__, zocl_xclbin_get_uuid(zdev), ret);
-	mutex_unlock(&zdev->zdev_xclbin_lock);
+	DRM_INFO("%s %pUb ret: %d", __func__, zocl_xclbin_get_uuid(domain),
+		ret);
+	mutex_unlock(&domain->zdev_xclbin_lock);
 	return ret;
 }
 
@@ -666,7 +704,7 @@ zocl_load_sect(struct drm_zocl_dev *zdev, struct axlf *axlf, char __user *xclbin
 				break;
 			}
 			domain->partial_overlay_id = -1;
-		} else if (domain->full_overlay_id != -1 &&
+		} else if (zdev->full_overlay_id != -1 &&
 			   axlf->m_header.m_mode == XCLBIN_FLAT) {
 			err = of_overlay_remove_all();
 			if (err < 0) {
@@ -675,7 +713,7 @@ zocl_load_sect(struct drm_zocl_dev *zdev, struct axlf *axlf, char __user *xclbin
 				break;
 			}
 			domain->partial_overlay_id = -1;
-			domain->full_overlay_id = -1;
+			zdev->full_overlay_id = -1;
 		}
 
 		bsize = zocl_read_sect(BITSTREAM, &bsection_buffer, axlf,
@@ -711,7 +749,7 @@ zocl_load_sect(struct drm_zocl_dev *zdev, struct axlf *axlf, char __user *xclbin
 		if (axlf->m_header.m_mode == XCLBIN_PR)
 			domain->partial_overlay_id = id;
 		else
-			domain->full_overlay_id = id;
+			zdev->full_overlay_id = id;
 
 		/* Restore the flags */
 		zdev->fpga_mgr->flags = flags;
@@ -1031,7 +1069,7 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 	if (ret)
 		goto out0;
 
-	/* SAIF TODO : Need to discuss about the kernels. Currently considering
+	/* SAIF TODO : Question ? Need to discuss about the kernels. Currently considering
 	 * it as a domain specific. */
 	if (domain->kernels != NULL) {
 		vfree(domain->kernels);
@@ -1099,7 +1137,7 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 	 * Remember xclbin_uuid for opencontext.
 	 */
 	domain->zdev_xclbin->zx_refcnt = 0;
-	zocl_xclbin_set_uuid(domain->zdev_xclbin, &axlf_head.m_header.uuid);
+	zocl_xclbin_set_uuid(domain, &axlf_head.m_header.uuid);
 
 	if (kds_mode == 1) {
 		/*
@@ -1108,12 +1146,21 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 		 */
 		write_unlock(&zdev->attr_rwlock);
 
-		(void) zocl_kds_reset(zdev);
-		ret = zocl_create_cu(zdev);
+		/* SAIF TODO : Question ? Do we need to stop kds while loading a
+		 * xclbin. For my thoughts we don't need as old CUs are not
+		 * affected.
+		 * */
+		//(void) zocl_kds_reset(zdev);
+		/* Destroy the CUs specific for this domain */
+		zocl_destroy_cu_domain(zdev, domain->domain_idx);
+
+		/* Create the CUs for this domain */
+		ret = zocl_create_cu(zdev, domain);
 		if (ret) {
 			write_lock(&zdev->attr_rwlock);
 			goto out0;
 		}
+
 		ret = zocl_kds_update(zdev, &axlf_obj->kds_cfg);
 		if (ret) {
 			write_lock(&zdev->attr_rwlock);
@@ -1127,7 +1174,8 @@ out0:
 	write_unlock(&zdev->attr_rwlock);
 	vfree(aie_res);
 	vfree(axlf);
-	DRM_INFO("%s %pUb ret: %d", __func__, zocl_xclbin_get_uuid(zdev), ret);
+	DRM_INFO("%s %pUb ret: %d", __func__, zocl_xclbin_get_uuid(domain),
+		ret);
 	return ret;
 }
 
@@ -1140,9 +1188,9 @@ zocl_xclbin_get_uuid(struct drm_zocl_domain *domain)
 }
 
 int
-zocl_xclbin_hold(struct drm_zocl_dev *zdev, const uuid_t *id)
+zocl_xclbin_hold(struct drm_zocl_domain *domain, const uuid_t *id)
 {
-	xuid_t *xclbin_id = (xuid_t *)zocl_xclbin_get_uuid(zdev);
+	xuid_t *xclbin_id = (xuid_t *)zocl_xclbin_get_uuid(domain);
 
 	if (!xclbin_id) {
 		DRM_ERROR("No active xclbin. Cannot hold ");
@@ -1154,48 +1202,48 @@ zocl_xclbin_hold(struct drm_zocl_dev *zdev, const uuid_t *id)
 		DRM_WARN("NULL uuid to hold\n");
 		return -EINVAL;
 	}
-	BUG_ON(!mutex_is_locked(&zdev->zdev_xclbin_lock));
+	BUG_ON(!mutex_is_locked(&domain->zdev_xclbin_lock));
 
 	if (!uuid_equal(id, xclbin_id)) {
-		DRM_ERROR("lock bitstream %pUb failed, on zdev: %pUb",
+		DRM_ERROR("lock bitstream %pUb failed, on Domain: %pUb",
 		    id, xclbin_id);
 		return -EBUSY;
 	}
 
-	zdev->zdev_xclbin->zx_refcnt++;
+	domain->zdev_xclbin->zx_refcnt++;
 	DRM_INFO("bitstream %pUb locked, ref=%d",
-		 id, zdev->zdev_xclbin->zx_refcnt);
+		 id, domain->zdev_xclbin->zx_refcnt);
 
 	return 0;
 }
 
-int zocl_lock_bitstream(struct drm_zocl_dev *zdev, const uuid_t *id)
+int zocl_lock_bitstream(struct drm_zocl_domain *domain, const uuid_t *id)
 {
 	int ret;
 
-	mutex_lock(&zdev->zdev_xclbin_lock);
-	ret = zocl_xclbin_hold(zdev, id);
-	mutex_unlock(&zdev->zdev_xclbin_lock);
+	mutex_lock(&domain->zdev_xclbin_lock);
+	ret = zocl_xclbin_hold(domain, id);
+	mutex_unlock(&domain->zdev_xclbin_lock);
 
 	return ret;
 }
 
 int
-zocl_xclbin_release(struct drm_zocl_dev *zdev, const uuid_t *id)
+zocl_xclbin_release(struct drm_zocl_domain *domain, const uuid_t *id)
 {
-	xuid_t *xclbin_uuid = (xuid_t *)zocl_xclbin_get_uuid(zdev);
+	xuid_t *xclbin_uuid = (xuid_t *)zocl_xclbin_get_uuid(domain);
 
 	if (!xclbin_uuid) {
 		DRM_ERROR("No active xclbin. Cannot release");
 		return -EINVAL;
 	}
 
-	BUG_ON(!mutex_is_locked(&zdev->zdev_xclbin_lock));
+	BUG_ON(!mutex_is_locked(&domain->zdev_xclbin_lock));
 
 	if (uuid_is_null(id)) /* force unlock all */
-		zdev->zdev_xclbin->zx_refcnt = 0;
+		domain->zdev_xclbin->zx_refcnt = 0;
 	else if (uuid_equal(xclbin_uuid, id))
-		--zdev->zdev_xclbin->zx_refcnt;
+		--domain->zdev_xclbin->zx_refcnt;
 	else {
 		DRM_WARN("unlock bitstream %pUb failed, on device: %pUb",
 			 id, xclbin_uuid);
@@ -1203,22 +1251,23 @@ zocl_xclbin_release(struct drm_zocl_dev *zdev, const uuid_t *id)
 	}
 
 	DRM_INFO("bitstream %pUb unlocked, ref=%d",
-		 xclbin_uuid, zdev->zdev_xclbin->zx_refcnt);
+		 xclbin_uuid, domain->zdev_xclbin->zx_refcnt);
 
 	return 0;
 }
 
-int zocl_unlock_bitstream(struct drm_zocl_dev *zdev, const uuid_t *id)
+int zocl_unlock_bitstream(struct drm_zocl_domain *domain, const uuid_t *id)
 {
 	int ret;
 
-	mutex_lock(&zdev->zdev_xclbin_lock);
-	ret = zocl_xclbin_release(zdev, id);
-	mutex_unlock(&zdev->zdev_xclbin_lock);
+	mutex_lock(&domain->zdev_xclbin_lock);
+	ret = zocl_xclbin_release(domain, id);
+	mutex_unlock(&domain->zdev_xclbin_lock);
 
 	return ret;
 }
 
+#if 0
 int
 zocl_graph_alloc_ctx(struct drm_zocl_dev *zdev, struct drm_zocl_ctx *ctx,
         struct sched_client_ctx *client)
@@ -1286,11 +1335,12 @@ zocl_aie_free_ctx(struct drm_zocl_dev *zdev, struct drm_zocl_ctx *ctx,
 {
 	return zocl_aie_free_context(zdev, client);
 }
+#endif
 
 int
-zocl_xclbin_set_uuid(struct zocl_xclbin *zdev_xclbin, void *uuid)
+zocl_xclbin_set_uuid(struct drm_zocl_domain *domain, void *uuid)
 {
-	xuid_t *zx_uuid = zdev_xclbin->zx_uuid;
+	xuid_t *zx_uuid = domain->zdev_xclbin->zx_uuid;
 
 	if (zx_uuid) {
 		vfree(zx_uuid);
@@ -1302,7 +1352,7 @@ zocl_xclbin_set_uuid(struct zocl_xclbin *zdev_xclbin, void *uuid)
 		return -ENOMEM;
 
 	uuid_copy(zx_uuid, uuid);
-	zdev_xclbin->zx_uuid = zx_uuid;
+	domain->zdev_xclbin->zx_uuid = zx_uuid;
 	return 0;
 }
 
@@ -1310,7 +1360,7 @@ int
 zocl_xclbin_init(struct zocl_xclbin *zdev_xclbin)
 {
 	zdev_xclbin = vmalloc(sizeof(struct zocl_xclbin));
-	if (!zdev->zdev_xclbin) {
+	if (!zdev_xclbin) {
 		DRM_ERROR("Alloc zdev_xclbin failed: no memory\n");
 		return -ENOMEM;
 	}
@@ -1373,6 +1423,7 @@ zocl_xclbin_intr_id(struct drm_zocl_dev *zdev, u32 idx)
 	return xclbin_intr_id(prop);
 }
 
+#if 0
 /*
  * returns false if any of the cu doesnt support interrupt
  */
@@ -1397,3 +1448,4 @@ zocl_xclbin_cus_support_intr(struct drm_zocl_dev *zdev)
 
 	return true;
 }
+#endif

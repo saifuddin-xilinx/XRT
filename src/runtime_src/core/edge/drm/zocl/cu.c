@@ -206,7 +206,8 @@ static int cu_probe(struct platform_device *pdev)
 
 	zdev = platform_get_drvdata(to_platform_device(pdev->dev.parent));
 
-	krnl_info = zocl_query_kernel(zdev, info->kname);
+	krnl_info = zocl_query_kernel(zdev->pr_domain[info->domain_idx],
+				     info->kname);
 	if (!krnl_info) {
 		err = -EFAULT;
 		goto err1;
