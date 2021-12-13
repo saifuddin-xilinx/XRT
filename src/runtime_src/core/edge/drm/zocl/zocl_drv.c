@@ -169,6 +169,7 @@ static void zocl_pr_domain_fini(struct drm_zocl_dev *zdev)
 	for (i = 0; i < zdev->num_pr_domain; i++) {
 		zocl_domain = zdev->pr_domain[i];
 		if (zocl_domain) {
+			zocl_free_sections(zocl_domain);
 			mutex_destroy(&zocl_domain->zdev_xclbin_lock);
 			zocl_xclbin_fini(zocl_domain->zdev_xclbin);
 			vfree(zocl_domain);
@@ -331,7 +332,8 @@ int subdev_create_cu(struct drm_zocl_dev *zdev, struct xrt_cu_info *info)
 		return -ENOMEM;
 	}
 
-	krnl_info = zocl_query_kernel(zdev, info->kname);
+	krnl_info = zocl_query_kernel(zdev->pr_domain[info->domain_idx],
+				     info->kname);
 	if(!krnl_info) {
 		DRM_WARN("%s CU has no metadata, using default size",info->kname);
 		info->size = 0x10000;
@@ -1056,7 +1058,6 @@ static int zocl_drm_platform_remove(struct platform_device *pdev)
 
 	zocl_clear_mem(zdev);
 	mutex_destroy(&zdev->mm_lock);
-	zocl_free_sections(zdev);
 	zocl_pr_domain_fini(zdev);
 	zocl_destroy_aie(zdev);
 	mutex_destroy(&zdev->aie_lock);

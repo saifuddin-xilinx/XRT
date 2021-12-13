@@ -114,13 +114,14 @@ struct drm_zocl_domain {
 	struct axlf             *axlf;
 	size_t                   axlf_size;
 	struct aie_metadata	 aie_data;
-	int			 ksize;
-	char			*kernels;
 
 	u64			 pr_isolation_addr;
 	u16			 pr_isolation_freeze;
 	u16			 pr_isolation_unfreeze;
 	int			 partial_overlay_id;
+
+	int			 ksize;
+	char			*kernels;
 
 	struct zocl_xclbin	*zdev_xclbin;
 	struct mutex		 zdev_xclbin_lock;

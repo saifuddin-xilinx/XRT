@@ -1169,6 +1169,22 @@ int kds_add_cu(struct kds_sched *kds, struct xrt_cu *xcu)
 	if (cu_mgmt->num_cus >= MAX_CUS)
 		return -ENOMEM;
 
+	/* SAIF TODO : I believe, we don't need to sort the CUs.
+	 * For multi slot this is not possible. We will find a free slot and
+	 * assign the CUs to that.
+	 */
+
+	/* Get a free slot in kds for this CU */
+	for (i = 0; i < cu_mgmt->MAX_CUS; i++) {
+		if (cu_mgmt->xcus[i] == NULL) {
+			insert_cu(cu_mgmt, i, xcu);
+			if (i > cu_mgmt->num_cus)
+				cu_mgmt->num_cus = i;
+
+			return 0;
+		}
+	}
+#if 0
 	/* Determin CUs ordering:
 	 * Sort CU in interrupt ID increase order.
 	 * If interrupt ID is the same, sort CU in address
@@ -1220,6 +1236,7 @@ int kds_add_cu(struct kds_sched *kds, struct xrt_cu *xcu)
 		++cu_mgmt->num_cus;
 		return 0;
 	}
+#endif
 
 	return -ENOSPC;
 }
@@ -1236,7 +1253,8 @@ int kds_del_cu(struct kds_sched *kds, struct xrt_cu *xcu)
 		if (cu_mgmt->xcus[i] != xcu)
 			continue;
 
-		--cu_mgmt->num_cus;
+		/* SAIF TODO : We should not do this here */
+		//--cu_mgmt->num_cus;
 		cu_mgmt->xcus[i] = NULL;
 		cu_stat_write(cu_mgmt, usage[i], 0);
 
@@ -1257,11 +1275,19 @@ int kds_add_scu(struct kds_sched *kds, struct xrt_cu *xcu)
 	if (scu_mgmt->num_cus >= MAX_CUS)
 		return -ENOMEM;
 
-	scu_mgmt->xcus[scu_mgmt->num_cus] = xcu;
-	xcu->info.cu_idx = scu_mgmt->num_cus;
-	++scu_mgmt->num_cus;
+	/* Get a free slot in kds for this CU */
+	for (i = 0; i < scu_mgmt->MAX_CUS; i++) {
+		if (scu_mgmt->xcus[i] == NULL) {
+			scu_mgmt->xcus[i] = xcu;
+			xcu->info.cu_idx = i;
+			if (i > scu_mgmt->num_cus)
+				scu_mgmt->num_cus = i;
 
-	return 0;
+			return 0;
+		}
+	}
+
+	return -ENOSPC;
 }
 
 int kds_del_scu(struct kds_sched *kds, struct xrt_cu *xcu)
@@ -1276,7 +1302,8 @@ int kds_del_scu(struct kds_sched *kds, struct xrt_cu *xcu)
 		if (scu_mgmt->xcus[i] != xcu)
 			continue;
 
-		--scu_mgmt->num_cus;
+		/* SAIF TODO : We should not do this here */
+		//--scu_mgmt->num_cus;
 		scu_mgmt->xcus[i] = NULL;
 		cu_stat_write(scu_mgmt, usage[i], 0);
 

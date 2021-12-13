@@ -212,6 +212,7 @@ enum CU_PROTOCOL {
 struct xrt_cu_info {
 	u32			 model;
 	int			 cu_idx;
+	int			 domain_idx;
 	int			 inst_idx;
 	u64			 addr;
 	size_t			 size;

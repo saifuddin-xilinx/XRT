@@ -68,6 +68,7 @@ static struct scheduler g_sched0;
 static struct sched_ops penguin_ops;
 static struct sched_ops ps_ert_ops;
 
+bool zocl_xclbin_cus_support_intr(struct drm_zocl_dev *zdev);
 int zocl_graph_alloc_ctx(struct drm_zocl_dev *zdev, struct drm_zocl_ctx *ctx,
         struct sched_client_ctx *client);
 int zocl_graph_free_ctx(struct drm_zocl_dev *zdev, struct drm_zocl_ctx *ctx,
@@ -3885,6 +3886,99 @@ out:
 	return ret;
 }
 
+/*
+ * returns false if any of the cu doesnt support interrupt
+ */
+bool
+zocl_xclbin_cus_support_intr(struct drm_zocl_dev *zdev)
+{
+        struct ip_data *ip;
+        int i;
+
+        if (!zdev->ip)
+                return false;
+
+        for (i = 0; i < zdev->ip->m_count; ++i) {
+                ip = &zdev->ip->m_ip_data[i];
+                if (xclbin_protocol(ip->properties) == AP_CTRL_NONE) {
+                        continue;
+                }
+                if (!(ip->properties & 0x1)) {
+                        return false;
+                }
+        }
+
+        return true;
+}
+
+
+int
+zocl_graph_alloc_ctx(struct drm_zocl_dev *zdev, struct drm_zocl_ctx *ctx,
+        struct sched_client_ctx *client)
+{
+        xuid_t *zdev_xuid, *ctx_xuid;
+        u32 gid = ctx->graph_id;
+        u32 flags = ctx->flags;
+        int ret;
+
+        mutex_lock(&zdev->zdev_xclbin_lock);
+
+        ctx_xuid = vmalloc(ctx->uuid_size);
+        if (!ctx_xuid) {
+                mutex_unlock(&zdev->zdev_xclbin_lock);
+                return -ENOMEM;
+        }
+
+        ret = copy_from_user(ctx_xuid, (void *)(uintptr_t)ctx->uuid_ptr,
+            ctx->uuid_size);
+        if (ret)
+                goto out;
+
+        zdev_xuid = (xuid_t *)zdev->zdev_xclbin->zx_uuid;
+
+        if (!zdev_xuid || !uuid_equal(zdev_xuid, ctx_xuid)) {
+                DRM_ERROR("try to allocate Graph CTX with wrong xclbin %pUB",
+                    ctx_xuid);
+                ret = -EINVAL;
+                goto out;
+        }
+
+        ret = zocl_aie_graph_alloc_context(zdev, gid, flags, client);
+out:
+        mutex_unlock(&zdev->zdev_xclbin_lock);
+        vfree(ctx_xuid);
+        return ret;
+}
+
+int
+zocl_graph_free_ctx(struct drm_zocl_dev *zdev, struct drm_zocl_ctx *ctx,
+        struct sched_client_ctx *client)
+{
+        u32 gid = ctx->graph_id;
+        int ret;
+
+        mutex_lock(&zdev->zdev_xclbin_lock);
+        ret = zocl_aie_graph_free_context(zdev, gid, client);
+        mutex_unlock(&zdev->zdev_xclbin_lock);
+
+        return ret;
+}
+
+int
+zocl_aie_alloc_ctx(struct drm_zocl_dev *zdev, struct drm_zocl_ctx *ctx,
+        struct sched_client_ctx *client)
+{
+        u32 flags = ctx->flags;
+
+        return zocl_aie_alloc_context(zdev, flags, client);
+}
+
+int
+zocl_aie_free_ctx(struct drm_zocl_dev *zdev, struct drm_zocl_ctx *ctx,
+        struct sched_client_ctx *client)
+{
+        return zocl_aie_free_context(zdev, client);
+}
 
 int sched_context_ioctl(struct drm_zocl_dev *zdev, void *data,
 		                              struct drm_file *filp)
