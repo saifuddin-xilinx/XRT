@@ -37,24 +37,22 @@ drv_common-y   := $(common_dir)/kds_core.o \
 
 zocl-y := \
 	$(drv_common-y) \
-	sched_exec.o \
-	zocl_sysfs.o \
-	zocl_ioctl.o \
-	zocl_ert.o \
-	zocl_watchdog.o \
 	zocl_drv.o \
-	zocl_bo.o \
-	zocl_dma.o \
+	zocl_xclbin.o \
 	zocl_cu.o \
+	zocl_ert.o \
+	zocl_dma.o \
 	zocl_mailbox.o \
+	zocl_ioctl.o \
 	zocl_ov_sysfs.o \
 	zocl_ospi_versal.o \
-	zocl_xclbin.o \
+	cu.o \
+	zocl_bo.o \
 	zocl_sk.o \
 	zocl_kds.o \
-	cu.o \
-	zocl_generic_cu.o \
 	zocl_error.o \
+	zocl_watchdog.o \
+	zocl_sysfs.o \
 	zocl_aie.o
 
 obj-m	+= zocl.o
