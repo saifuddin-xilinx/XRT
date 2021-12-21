@@ -279,7 +279,7 @@ static int zocl_ov_get_xclbin(struct zocl_ov_dev *ov)
 	}
 
 	write_unlock(&ov->att_rwlock);
-	zdev = (struct drm_zocl_dev *)pdev;
+	zdev = (struct drm_zocl_dev *)pdrv;
 	if (!zdev) {
 		ret = -ENXIO;
 		goto out;

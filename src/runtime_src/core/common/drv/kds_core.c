@@ -51,17 +51,24 @@ ssize_t show_kds_custat_raw(struct kds_sched *kds, char *buf)
 {
 	struct kds_cu_mgmt *cu_mgmt = &kds->cu_mgmt;
 	struct xrt_cu *xcu = NULL;
-	char *cu_fmt = "%d,%s:%s,0x%llx,0x%x,%llu\n";
+	char *cu_fmt = "%d,%d,%s:%s,0x%llx,0x%x,%llu\n";
 	ssize_t sz = 0;
 	int i;
+	int j;
 
 	mutex_lock(&cu_mgmt->lock);
-	for (i = 0; i < cu_mgmt->num_cus; ++i) {
-		xcu = cu_mgmt->xcus[i];
-		sz += scnprintf(buf+sz, PAGE_SIZE - sz, cu_fmt, i,
-				xcu->info.kname, xcu->info.iname,
-				xcu->info.addr, xcu->status,
-				cu_stat_read(cu_mgmt, usage[i]));
+	for (j = 0; j < MAX_DOMAIN; ++j) {
+		for (i = 0; i < cu_mgmt->num_cus; ++i) {
+			xcu = cu_mgmt->xcus[i];
+			/* Show the CUs as per domain order */
+			if (!xcu && (xcu->info.domain_idx != j))
+				continue;
+
+			sz += scnprintf(buf+sz, PAGE_SIZE - sz, cu_fmt, j, i,
+					xcu->info.kname, xcu->info.iname,
+					xcu->info.addr, xcu->status,
+					cu_stat_read(cu_mgmt, usage[i]));
+		}
 	}
 	mutex_unlock(&cu_mgmt->lock);
 
@@ -74,9 +81,11 @@ ssize_t show_kds_custat_raw(struct kds_sched *kds, char *buf)
 ssize_t show_kds_scustat_raw(struct kds_sched *kds, char *buf)
 {
 	struct kds_scu_mgmt *scu_mgmt = &kds->scu_mgmt;
-	char *cu_fmt = "%d,%s,0x%x,%u\n";
+	char *cu_fmt = "%d,%d,%s,0x%x,%u\n";
+	struct xrt_cu *xcu = NULL;
 	ssize_t sz = 0;
 	int i;
+	int j;
 
 	/* TODO: The number of PS kernel could be 64 or even more.
 	 * Sysfs has PAGE_SIZE limit, which keep bother us in old KDS.
@@ -89,14 +98,22 @@ ssize_t show_kds_scustat_raw(struct kds_sched *kds, char *buf)
 	 * But in the worst case, this is still not good enough.
 	 *
 	 * Soft kernels are namespaced with a domain identifer that
-	 * is or'ed into the scu index.	 For soft kernels the 
+	 * is or'ed into the scu index.	 For soft kernels the
 	 * domain is SCU_DOMAIN.
 	 */
 	mutex_lock(&scu_mgmt->lock);
-	for (i = 0; i < scu_mgmt->num_cus; ++i) {
-		sz += scnprintf(buf+sz, PAGE_SIZE - sz, cu_fmt, (i | SCU_DOMAIN),
-				scu_mgmt->name[i], scu_mgmt->status[i],
-				cu_stat_read(scu_mgmt,usage[i]));
+	for (j = 0; j < MAX_DOMAIN; ++j) {
+		for (i = 0; i < scu_mgmt->num_cus; ++i) {
+			xcu = scu_mgmt->xcus[i];
+			/* Show the CUs as per domain order */
+			if (!xcu && (xcu->info.domain_idx != j))
+				continue;
+
+			sz += scnprintf(buf+sz, PAGE_SIZE - sz, cu_fmt, j,
+					(i | SCU_DOMAIN), scu_mgmt->name[i],
+					scu_mgmt->status[i],
+					cu_stat_read(scu_mgmt,usage[i]));
+		}
 	}
 	mutex_unlock(&scu_mgmt->lock);
 
@@ -1293,6 +1310,7 @@ int kds_add_cu(struct kds_sched *kds, struct xrt_cu *xcu)
 int kds_del_cu(struct kds_sched *kds, struct xrt_cu *xcu)
 {
 	struct kds_cu_mgmt *cu_mgmt = &kds->cu_mgmt;
+	int i;
 
 	if (cu_mgmt->num_cus == 0)
 		return -EINVAL;

@@ -445,7 +445,7 @@ void zocl_free_bo(struct drm_gem_object *obj)
 
 			/* Update memory usage statistics */
 			zocl_update_mem_stat(zdev, obj->size, -1,
-			    zocl_obj->bank);
+			    zocl_obj->mem_index);
 		} else {
 			if (zocl_obj->mm_node) {
 				mutex_lock(&zdev->mm_lock);
@@ -457,7 +457,7 @@ void zocl_free_bo(struct drm_gem_object *obj)
 					zocl_obj->vmapping = NULL;
 				}
 				zocl_update_mem_stat(zdev, obj->size, -1,
-				    zocl_obj->bank);
+				    zocl_obj->mem_index);
 			}
 			drm_gem_object_release(obj);
 			kfree(zocl_obj);
@@ -487,7 +487,7 @@ void zocl_free_bo(struct drm_gem_object *obj)
 
 			/* Update memory usage statistics */
 			zocl_update_mem_stat(zdev, obj->size, -1,
-			    zocl_obj->bank);
+			    zocl_obj->mem_index);
 		}
 	}
 	if (zocl_obj->sgt)
@@ -609,6 +609,7 @@ static int zocl_mmap(struct file *filp, struct vm_area_struct *vma)
 		return 0;
 	}
 
+#if 0
 	/* Hardware component physical address mapping. Typically, this is used
 	 * to map the registers of a compute unit to user space.
 	 *
@@ -624,6 +625,7 @@ static int zocl_mmap(struct file *filp, struct vm_area_struct *vma)
 		DRM_ERROR("Schduler is not configured\n");
 		return -EINVAL;
 	}
+#endif
 
 	/* Only allow user to map register ranges in apertures list.
 	 * Could not map from the middle of an aperture.
@@ -686,31 +688,18 @@ static vm_fault_t zocl_bo_fault(struct vm_fault *vmf)
 
 static int zocl_client_open(struct drm_device *dev, struct drm_file *filp)
 {
-	if (kds_mode == 1) {
-		return zocl_create_client(dev->dev_private, &filp->driver_priv);
-	} else {
-		return sched_create_client(dev, &filp->driver_priv);
-	}
+	return zocl_create_client(dev->dev_private, &filp->driver_priv);
 }
 
 static void zocl_client_release(struct drm_device *dev, struct drm_file *filp)
 {
-	if (kds_mode == 1) {
-		zocl_destroy_client(dev->dev_private, &filp->driver_priv);
-		return;
-	}
-	else {
-		sched_destroy_client(dev, &filp->driver_priv);
-		return;
-	}
+	zocl_destroy_client(dev->dev_private, &filp->driver_priv);
+	return;
 }
 
 static unsigned int zocl_poll(struct file *filp, poll_table *wait)
 {
-	if (kds_mode == 1)
-		return zocl_poll_client(filp, wait);
-	else
-		return sched_poll_client(filp, wait);
+	return zocl_poll_client(filp, wait);
 }
 
 static int zocl_iommu_init(struct drm_zocl_dev *zdev,
@@ -1012,15 +1001,9 @@ static int zocl_drm_platform_probe(struct platform_device *pdev)
 		goto err_err;
 
 	/* Now initial kds */
-	if (kds_mode == 1) {
-		ret = zocl_init_sched(zdev);
-		if (ret)
-			goto err_sched;
-	} else {
-		ret = sched_init_exec(drm);
-		if (ret)
-			goto err_sched;
-	}
+	ret = zocl_init_sched(zdev);
+	if (ret)
+		goto err_sched;
 
 	return 0;
 
@@ -1059,9 +1042,6 @@ static int zocl_drm_platform_remove(struct platform_device *pdev)
 	if (zdev->fpga_mgr)
 		fpga_mgr_put(zdev->fpga_mgr);
 
-	if (kds_mode == 0)
-		sched_fini_exec(drm);
-
 	zocl_clear_mem(zdev);
 	mutex_destroy(&zdev->mm_lock);
 	zocl_pr_domain_fini(zdev);
@@ -1070,8 +1050,7 @@ static int zocl_drm_platform_remove(struct platform_device *pdev)
 	zocl_fini_sysfs(drm->dev);
 	zocl_fini_error(zdev);
 
-	if (kds_mode == 1)
-		zocl_fini_sched(zdev);
+	zocl_fini_sched(zdev);
 
 	kfree(zdev->apertures);
 

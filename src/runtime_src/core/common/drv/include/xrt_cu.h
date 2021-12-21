@@ -28,6 +28,7 @@
 #endif
 
 #define MAX_CUS 128
+#define MAX_DOMAIN 32
 
 /* Soft kernel indices are numbered from 0 to some MAX_CUS
  * but are in a distinct domain which is indiciated by the

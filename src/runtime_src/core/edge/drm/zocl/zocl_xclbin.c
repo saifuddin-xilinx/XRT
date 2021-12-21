@@ -488,7 +488,7 @@ zocl_create_cu(struct drm_zocl_dev *zdev, struct drm_zocl_domain *domain)
 			info.model = XCU_FA;
 			break;
 		default:
-			return -EINVAL;
+			goto err;
 		}
 
 		info.inst_idx = zocl_get_cu_inst_idx(zdev);
@@ -930,26 +930,19 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 		}
 	}
 
-	if (kds_mode == 0) {
-		if (sched_live_clients(zdev, NULL) || sched_is_busy(zdev)) {
-			DRM_ERROR("Current xclbin is in-use, can't change");
-			ret = -EBUSY;
-			goto out0;
-		}
-	} else {
-		/* 1. We locked &zdev->zdev_xclbin_lock so that no new contexts
-		 * can be opened and/or closed
-		 * 2. A opened context would lock bitstream and hold it.
-		 * 3. If all contexts are closed, new kds would make sure all
-		 * relative exec BO are released
-		 */
-		if (zocl_xclbin_refcount(domain) > 0) {
-			DRM_ERROR("Current xclbin is in-use, can't change");
-			ret = -EBUSY;
-			goto out0;
-		}
+	/* 1. We locked &zdev->zdev_xclbin_lock so that no new contexts
+	 * can be opened and/or closed
+	 * 2. A opened context would lock bitstream and hold it.
+	 * 3. If all contexts are closed, new kds would make sure all
+	 * relative exec BO are released
+	 */
+	if (zocl_xclbin_refcount(domain) > 0) {
+		DRM_ERROR("Current xclbin is in-use, can't change");
+		ret = -EBUSY;
+		goto out0;
 	}
 
+#if 0
 	/* uuid is null means first time load xclbin */
 	if (zocl_xclbin_get_uuid(domain) != NULL) {
 		/* reset scheduler prior to load new xclbin */
@@ -959,6 +952,7 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 				goto out0;
 		}
 	}
+#endif
 
 	zocl_free_sections(domain);
 
