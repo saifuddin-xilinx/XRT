@@ -180,5 +180,6 @@ struct drm_zocl_dev {
 	struct drm_zocl_domain	*pr_domain[MAX_PR_DOMAIN_NUM];
 };
 
-int zocl_kds_update(struct drm_zocl_dev *zdev, struct drm_zocl_kds *cfg);
+int zocl_kds_update(struct drm_zocl_dev *zdev, struct drm_zocl_domain *domain,
+		    struct drm_zocl_kds *cfg);
 #endif

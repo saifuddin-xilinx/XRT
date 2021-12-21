@@ -28,6 +28,8 @@ int zocl_xclbin_hold(struct drm_zocl_domain *domain, const uuid_t *id);
 int zocl_lock_bitstream(struct drm_zocl_domain *domain, const uuid_t *id);
 int zocl_xclbin_release(struct drm_zocl_domain *domain, const uuid_t *id);
 int zocl_unlock_bitstream(struct drm_zocl_domain *domain, const uuid_t *id);
+struct drm_zocl_domain *zocl_get_domain(struct drm_zocl_dev *zdev,
+					uuid_t *id);
 
 int zocl_xclbin_refcount(struct drm_zocl_domain *domain);
 int zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev,

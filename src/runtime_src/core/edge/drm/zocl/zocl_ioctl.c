@@ -30,9 +30,7 @@ zocl_read_axlf_ioctl(struct drm_device *ddev, void *data, struct drm_file *filp)
 	struct sched_client_ctx *client = filp->driver_priv;
 	int ret;
 
-	mutex_lock(&zdev->zdev_xclbin_lock);
 	ret = zocl_xclbin_read_axlf(zdev, axlf_obj, client);
-	mutex_unlock(&zdev->zdev_xclbin_lock);
 
 	return ret;
 }
@@ -66,7 +64,7 @@ zocl_ctx_ioctl(struct drm_device *ddev, void *data, struct drm_file *filp)
 	}
 	else
 		ret = sched_context_ioctl(zdev, data, filp);
-		
+
 
 	return ret;
 }

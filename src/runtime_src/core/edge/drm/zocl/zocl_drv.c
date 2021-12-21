@@ -106,6 +106,12 @@ static int zocl_pr_domain_init(struct drm_zocl_dev *zdev,
 			zdev->num_pr_domain = (int)pr_num;
 	}
 
+	/* If there is no information available for number of domain available
+	 * for this device then consider it for a single domain device for
+	 * backward compartability.
+	 */
+	zdev->num_pr_domain = 1;
+
 	for (i = 0; i < zdev->num_pr_domain; i++) {
 		zocl_domain = (struct drm_zocl_domain *)
 			kzalloc(sizeof(struct drm_zocl_domain), GFP_KERNEL);

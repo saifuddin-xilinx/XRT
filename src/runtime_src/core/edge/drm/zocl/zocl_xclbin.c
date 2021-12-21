@@ -523,6 +523,23 @@ zocl_xclbin_same_uuid(struct drm_zocl_domain *domain, xuid_t *uuid)
 	    uuid_equal(uuid, zocl_xclbin_get_uuid(domain)));
 }
 
+struct drm_zocl_domain *
+zocl_get_domain(struct drm_zocl_dev *zdev, uuid_t *id)
+{
+	struct drm_zocl_domain *zocl_domain = NULL;
+	int i;
+
+	for (i = 0; i < zdev->num_pr_domain; i++) {
+		zocl_domain = zdev->pr_domain[i];
+		if (zocl_domain) {
+			if (zocl_xclbin_same_uuid(zocl_domain, id))
+				return zocl_domain;
+		}
+	}
+
+	return NULL;
+}
+
 /*
  * This function takes an XCLBIN in kernel buffer and extracts
  * BITSTREAM_PDI section (or PDI section). Then load the extracted
@@ -836,16 +853,18 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 		return -EINVAL;
 	}
 
-	BUG_ON(!mutex_is_locked(&domain->zdev_xclbin_lock));
+	mutex_lock(&domain->zdev_xclbin_lock);
 
 	if (copy_from_user(&axlf_head, axlf_obj->za_xclbin_ptr,
 	    sizeof(struct axlf))) {
 		DRM_WARN("copy_from_user failed for za_xclbin_ptr");
+		mutex_unlock(&domain->zdev_xclbin_lock);
 		return -EFAULT;
 	}
 
 	if (memcmp(axlf_head.m_magic, "xclbin2", 8)) {
 		DRM_WARN("xclbin magic is invalid %s", axlf_head.m_magic);
+		mutex_unlock(&domain->zdev_xclbin_lock);
 		return -EINVAL;
 	}
 
@@ -856,12 +875,14 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 	axlf = vmalloc(axlf_size);
 	if (!axlf) {
 		DRM_WARN("read xclbin fails: no memory");
+		mutex_unlock(&domain->zdev_xclbin_lock);
 		return -ENOMEM;
 	}
 
 	if (copy_from_user(axlf, axlf_obj->za_xclbin_ptr, axlf_size)) {
 		DRM_WARN("read xclbin: fail copy from user memory");
 		vfree(axlf);
+		mutex_unlock(&domain->zdev_xclbin_lock);
 		return -EFAULT;
 	}
 
@@ -870,6 +891,7 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 	if (ret) {
 		DRM_WARN("read xclbin: fail the access check");
 		vfree(axlf);
+		mutex_unlock(&domain->zdev_xclbin_lock);
 		return -EFAULT;
 	}
 
@@ -1161,7 +1183,7 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 			goto out0;
 		}
 
-		ret = zocl_kds_update(zdev, &axlf_obj->kds_cfg);
+		ret = zocl_kds_update(zdev, domain, &axlf_obj->kds_cfg);
 		if (ret) {
 			write_lock(&zdev->attr_rwlock);
 			goto out0;
@@ -1176,6 +1198,7 @@ out0:
 	vfree(axlf);
 	DRM_INFO("%s %pUb ret: %d", __func__, zocl_xclbin_get_uuid(domain),
 		ret);
+	mutex_unlock(&domain->zdev_xclbin_lock);
 	return ret;
 }
 
