@@ -127,7 +127,7 @@ struct drm_zocl_bo {
 	};
 	struct drm_mm_node            *mm_node;
 	struct drm_zocl_exec_metadata  metadata;
-	unsigned int                   bank;
+	unsigned int                   mem_index;
 	uint32_t                       flags;
 	unsigned int                   user_flags;
 };

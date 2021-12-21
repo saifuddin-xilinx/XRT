@@ -179,10 +179,12 @@ zocl_create_range_mem(struct drm_device *dev, size_t size, struct zocl_mem *mem)
 	}
 
 	mutex_lock(&zdev->mm_lock);
-
-	do { 
+#if 0
+	do {
+#endif
 		if (mem->zm_type == ZOCL_MEM_TYPE_CMA) {
-			struct drm_zocl_bo *cma_bo = zocl_create_cma_mem(dev, size);
+			struct drm_zocl_bo *cma_bo = zocl_create_cma_mem(dev,
+									 size);
 			if (!IS_ERR(cma_bo)) {
 				/* Get the memory from CMA memory region */
 				mutex_unlock(&zdev->mm_lock);
@@ -196,21 +198,26 @@ zocl_create_range_mem(struct drm_device *dev, size_t size, struct zocl_mem *mem)
 					" whereas requested for reserved memory region\n");
 		}
 		else {
-			err = drm_mm_insert_node_generic(mem->zm_mm,
-				bo->mm_node, size, PAGE_SIZE, 0, 0);
+			err = drm_mm_insert_node_in_range(zdev->zm_drm_mm,
+				bo->mm_node, size, PAGE_SIZE,
+				mem->zm_base_addr,
+				mem->zm_base_addr + mem->zm_size, 0);
 			if (!err) {
 				/* Got memory from this Range memory manager */
 				break;
 			}
 		}
 
+		/* SAIF TODO : Need to revisit this concept (DDR/LPDDR) */
+#if 0
 		/* No memory left to this memory manager.
 		 * Try to allocate from similer memory manger link list
 		 */
 		mem = list_entry(mem->zm_mm_list.next, typeof(*mem), zm_mm_list);
 
 	} while (&mem->zm_mm_list != &head_mem->zm_mm_list);
-	
+#endif
+
 	if (err) {
 		DRM_ERROR("Fail to allocate BO: size %ld\n",
 				(long)size);
@@ -241,6 +248,19 @@ zocl_create_range_mem(struct drm_device *dev, size_t size, struct zocl_mem *mem)
 	return bo;
 }
 
+/* This function retruns zocl memory for the given memory index */
+static struct zocl_mem *
+zocl_get_mem(struct drm_zocl_dev *zdev, u32 mem_index)
+{
+	struct zocl_mem *curr_mem;
+	list_for_each_entry(curr_mem, &zdev->zm_list_head, link)
+		if (curr_mem->zm_mem_idx == mem_index)
+			return curr_mem;
+
+
+	return NULL;
+}
+
 static struct drm_zocl_bo *
 zocl_create_bo(struct drm_device *dev, uint64_t unaligned_size, u32 user_flags)
 {
@@ -263,14 +283,16 @@ zocl_create_bo(struct drm_device *dev, uint64_t unaligned_size, u32 user_flags)
 	} else if (user_flags & ZOCL_BO_FLAGS_CMA) {
 		bo = zocl_create_cma_mem(dev, size);
 	} else {
-		/* We are allocating from a separate BANK, i.e. PL-DDR or LPDDR */
-		unsigned int bank = GET_MEM_BANK(user_flags);
+		/* We are allocating from a separate mem Index, i.e. PL-DDR or LPDDR */
+		unsigned int mem_index = GET_MEM_INDEX(user_flags);
+		struct zocl_mem *mem = zocl_get_mem(zdev, mem_index);
+		if (mem == NULL)
+			return ERR_PTR(-ENOMEM);
 
-		if (bank >= zdev->num_mem || !zdev->mem[bank].zm_used ||
-		    zdev->mem[bank].zm_type != ZOCL_MEM_TYPE_RANGE_ALLOC)
+		if (mem->zm_used || mem->zm_type != ZOCL_MEM_TYPE_RANGE_ALLOC)
 			return ERR_PTR(-EINVAL);
 
-		bo = zocl_create_range_mem(dev, size, &zdev->mem[bank]);
+		bo = zocl_create_range_mem(dev, size, mem);
 	}
 
 	if (user_flags & ZOCL_BO_FLAGS_EXECBUF) {
@@ -302,7 +324,7 @@ zocl_create_svm_bo(struct drm_device *dev, void *data, struct drm_file *filp)
 
 	bo = zocl_create_bo(dev, args->size, args->flags);
 	bo->flags |= ZOCL_BO_FLAGS_SVM;
-	bo->bank = GET_MEM_BANK(args->flags);
+	bo->mem_index = GET_MEM_INDEX(args->flags);
 
 	if (IS_ERR(bo)) {
 		DRM_DEBUG("object creation failed\n");
@@ -343,7 +365,7 @@ zocl_create_svm_bo(struct drm_device *dev, void *data, struct drm_file *filp)
 	ZOCL_DRM_GEM_OBJECT_PUT_UNLOCKED(&bo->gem_base);
 
 	/* Update memory usage statistics */
-	zocl_update_mem_stat(dev->dev_private, args->size, 1, bo->bank);
+	zocl_update_mem_stat(dev->dev_private, args->size, 1, bo->mem_index);
 
 	return bo;
 
@@ -373,7 +395,7 @@ zocl_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 		return 0;
 	}
 
-	bank = GET_MEM_BANK(args->flags);
+	mem_index = GET_MEM_INDEX(args->flags);
 
 	/* Always allocate EXECBUF from CMA */
 	if (args->flags & ZOCL_BO_FLAGS_EXECBUF)
@@ -978,10 +1000,13 @@ void zocl_free_host_bo(struct drm_gem_object *gem_obj)
  * freeing 'count' BOs with total size 'size'.
  */
 void zocl_update_mem_stat(struct drm_zocl_dev *zdev, u64 size, int count,
-		uint32_t bank)
+		uint32_t index)
 {
 	int i, update_bank = zdev->num_mem;
 
+	struct zocl_mem *mem = zocl_get_mem(zdev, index);
+	/* SAIF TODO : Need to revisit this logic later */
+#if 0
 	/*
 	 * If the 'bank' passed in is a valid bank and its type is
 	 * PL-DDR or LPDDR , we update that bank usage. Otherwise, we go
@@ -1002,12 +1027,14 @@ void zocl_update_mem_stat(struct drm_zocl_dev *zdev, u64 size, int count,
 	}
 
 	if (update_bank == zdev->num_mem)
+#endif
+	if (!mem)
 		return;
 
 	write_lock(&zdev->attr_rwlock);
-	zdev->mem[update_bank].zm_stat.memory_usage +=
+	mem->zm_stat.memory_usage +=
 	    (count > 0) ?  size : -size;
-	zdev->mem[update_bank].zm_stat.bo_count += count;
+	mem->zm_stat.bo_count += count;
 	write_unlock(&zdev->attr_rwlock);
 }
 
