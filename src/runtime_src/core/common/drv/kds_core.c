@@ -27,6 +27,7 @@ int store_kds_echo(struct kds_sched *kds, const char *buf, size_t count,
 	u32 enable;
 	u32 live_clients;
 
+	printk("[SAIF_TEST_KDS_CORE -> %s : %d] ---------%p\n", __func__, __LINE__);
 	live_clients = kds_live_clients(kds, NULL);
 	/* Ideally, KDS should be locked to reject new client.
 	 * But, this node is hidden for internal test purpose.
@@ -56,18 +57,26 @@ ssize_t show_kds_custat_raw(struct kds_sched *kds, char *buf)
 	int i;
 	int j;
 
+	printk("[SAIF_TEST_KDS_CORE -> %s : %d] ---------, num %d\n", __func__, __LINE__,
+	       cu_mgmt->num_cus);
 	mutex_lock(&cu_mgmt->lock);
 	for (j = 0; j < MAX_DOMAIN; ++j) {
 		for (i = 0; i < cu_mgmt->num_cus; ++i) {
 			xcu = cu_mgmt->xcus[i];
-			/* Show the CUs as per domain order */
-			if (!xcu && (xcu->info.domain_idx != j))
+			if (!xcu)
 				continue;
 
-			sz += scnprintf(buf+sz, PAGE_SIZE - sz, cu_fmt, j, i,
-					xcu->info.kname, xcu->info.iname,
-					xcu->info.addr, xcu->status,
-					cu_stat_read(cu_mgmt, usage[i]));
+			printk("[SAIF_TEST_KDS_CORE -> %s : %d] --------- xcu[dom %d:%d] %p, dom id %d\n",
+			       __func__, __LINE__, j, i, xcu, xcu->info.domain_idx);
+
+			/* Show the CUs as per domain order */
+			if (xcu->info.domain_idx == j) {
+				printk("[SAIF_TEST_KDS_CORE -> %s : %d] ---------\n", __func__, __LINE__);
+				sz += scnprintf(buf+sz, PAGE_SIZE - sz, cu_fmt, j, i,
+						xcu->info.kname, xcu->info.iname,
+						xcu->info.addr, xcu->status,
+						cu_stat_read(cu_mgmt, usage[i]));
+			}
 		}
 	}
 	mutex_unlock(&cu_mgmt->lock);
@@ -87,6 +96,7 @@ ssize_t show_kds_scustat_raw(struct kds_sched *kds, char *buf)
 	int i;
 	int j;
 
+	printk("[SAIF_TEST_KDS_CORE -> %s : %d] ---------%p\n", __func__, __LINE__);
 	/* TODO: The number of PS kernel could be 64 or even more.
 	 * Sysfs has PAGE_SIZE limit, which keep bother us in old KDS.
 	 * In 128 PS kernels case, each line is average 32 bytes.
@@ -129,6 +139,7 @@ ssize_t show_kds_stat(struct kds_sched *kds, char *buf)
 	int ref;
 	int i;
 
+	printk("[SAIF_TEST_KDS_CORE -> %s : %d] ---------%p\n", __func__, __LINE__);
 	mutex_lock(&cu_mgmt->lock);
 	sz += scnprintf(buf+sz, PAGE_SIZE - sz,
 			"CU to host interrupt capability: %d\n",
@@ -851,6 +862,12 @@ int kds_open_ucu(struct kds_sched *kds, struct kds_client *client, u32 cu_idx)
 
 int kds_init_sched(struct kds_sched *kds)
 {
+	int i;
+
+	for (i = 0; i < MAX_CUS; i++) {
+		kds->cu_mgmt.xcus[i] = NULL;
+		kds->scu_mgmt.xcus[i] = NULL;
+	}
 	kds->cu_mgmt.cu_stats = alloc_percpu(struct cu_stats);
 	if (!kds->cu_mgmt.cu_stats)
 		return -ENOMEM;
@@ -1233,6 +1250,7 @@ int kds_add_cu(struct kds_sched *kds, struct xrt_cu *xcu)
 #endif
 	int i;
 
+	printk("[SAIF_TEST -> %s : %d] ---------, num %d\n", __func__, __LINE__, cu_mgmt->num_cus);
 	if (cu_mgmt->num_cus >= MAX_CUS)
 		return -ENOMEM;
 
@@ -1241,16 +1259,23 @@ int kds_add_cu(struct kds_sched *kds, struct xrt_cu *xcu)
 	 * assign the CUs to that.
 	 */
 
+	printk("[SAIF_TEST -> %s : %d] ---------, num %d\n", __func__, __LINE__, cu_mgmt->num_cus);
 	/* Get a free slot in kds for this CU */
-	for (i = 0; i < cu_mgmt->num_cus; i++) {
+	for (i = 0; i < MAX_CUS; i++) {
+		printk("[SAIF_TEST -> %s : %d] ---------, i %d\n", __func__, __LINE__, i);
 		if (cu_mgmt->xcus[i] == NULL) {
+			printk("[SAIF_TEST -> %s : %d] ---------, i %d\n", __func__, __LINE__, i);
 			insert_cu(cu_mgmt, i, xcu);
-			if (i > cu_mgmt->num_cus)
-				cu_mgmt->num_cus = i;
+			printk("[SAIF_TEST -> %s : %d] ---------, i %d\n", __func__, __LINE__, i);
+			if (i >= cu_mgmt->num_cus)
+				cu_mgmt->num_cus = i + 1; // Count is +1 than Index
 
+			printk("[SAIF_TEST -> %s : %d] ---------, num %d\n", __func__, __LINE__, cu_mgmt->num_cus);
 			return 0;
 		}
 	}
+
+	printk("[SAIF_TEST -> %s : %d] ---------, num %d\n", __func__, __LINE__, cu_mgmt->num_cus);
 #if 0
 	/* Determin CUs ordering:
 	 * Sort CU in interrupt ID increase order.
@@ -1312,23 +1337,31 @@ int kds_del_cu(struct kds_sched *kds, struct xrt_cu *xcu)
 	struct kds_cu_mgmt *cu_mgmt = &kds->cu_mgmt;
 	int i;
 
+	printk("[SAIF_TEST -> %s : %d] --------- %d \n", __func__, __LINE__, cu_mgmt->num_cus);
 	if (cu_mgmt->num_cus == 0)
 		return -EINVAL;
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	for (i = 0; i < MAX_CUS; i++) {
+		printk("[SAIF_TEST -> %s : %d] ---------i = %d \n", __func__, __LINE__, i);
 		if (cu_mgmt->xcus[i] != xcu)
 			continue;
+
+		printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 
 		/* SAIF TODO : We should not do this here */
 		//--cu_mgmt->num_cus;
 		cu_mgmt->xcus[i] = NULL;
 		cu_stat_write(cu_mgmt, usage[i], 0);
+		printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	}
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	/* m2m cu */
 	if (xcu->info.intr_id == M2M_CU_ID)
 		cu_mgmt->num_cdma--;
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	return 0;
 }
 

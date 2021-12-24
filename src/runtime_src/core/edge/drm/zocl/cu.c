@@ -179,22 +179,28 @@ static int cu_probe(struct platform_device *pdev)
 	int err = 0;
 	int i;
 
+	printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 	zcu = kzalloc(sizeof(*zcu), GFP_KERNEL);
 	if (!zcu)
 		return -ENOMEM;
 
+	printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 	zcu->pdev = pdev;
 	zcu->base.dev = &pdev->dev;
 
+	printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 	info = dev_get_platdata(&pdev->dev);
 	memcpy(&zcu->base.info, info, sizeof(struct xrt_cu_info));
 
+	printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 	res = vzalloc(sizeof(struct resource *) * info->num_res);
+	printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 	if (!res) {
 		err = -ENOMEM;
 		goto err;
 	}
 
+	printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 	for (i = 0; i < info->num_res; ++i) {
 		res[i] = platform_get_resource(pdev, IORESOURCE_MEM, i);
 		if (!res[i]) {
@@ -202,10 +208,12 @@ static int cu_probe(struct platform_device *pdev)
 			goto err1;
 		}
 	}
+	printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 	zcu->base.res = res;
 
 	zdev = platform_get_drvdata(to_platform_device(pdev->dev.parent));
 
+	printk("[SAIF_TEST_CU -> %s : %d] : ------name %s \n", __func__, __LINE__, info->kname);
 	krnl_info = zocl_query_kernel(zdev->pr_domain[info->domain_idx],
 				     info->kname);
 	if (!krnl_info) {
@@ -213,6 +221,8 @@ static int cu_probe(struct platform_device *pdev)
 		goto err1;
 	}
 
+	printk("[SAIF_TEST_CU -> %s : %d] : ------kname %s anum %d\n", __func__, __LINE__,
+	       krnl_info->name, krnl_info->anums);
 	if(krnl_info->anums)
 	{
 		args = vmalloc(sizeof(struct xrt_cu_arg) * krnl_info->anums);
@@ -222,27 +232,40 @@ static int cu_probe(struct platform_device *pdev)
 		}
 	}
 
+	printk("[SAIF_TEST_CU -> %s : %d] : ------ Totoal args %d \n",
+	       __func__, __LINE__, krnl_info->anums);
 	for (i = 0; i < krnl_info->anums; i++) {
+		printk("[SAIF_TEST_CU -> %s : %d] : ------ i %d\n", __func__, __LINE__, i);
 		strcpy(args[i].name, krnl_info->args[i].name);
+		printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 		args[i].offset = krnl_info->args[i].offset;
+		printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 		args[i].size = krnl_info->args[i].size;
+		printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 		args[i].dir = krnl_info->args[i].dir;
+		printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 	}
+	printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 	zcu->base.info.num_args = krnl_info->anums;
+	printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 	zcu->base.info.args = args;
 
+	printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 	err = zocl_kds_add_cu(zdev, &zcu->base);
 	if (err) {
 		DRM_ERROR("Not able to add CU %p to KDS", zcu);
 		goto err1;
 	}
+	printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 
 	zcu->irq_name = kzalloc(20, GFP_KERNEL);
 	if (!zcu->irq_name)
 		return -ENOMEM;
 
+	printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 	sprintf(zcu->irq_name, "zocl_cu[%d]", info->intr_id);
 
+	printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 	if (info->intr_enable) {
 		zcu->irq = zdev->irq[info->intr_id];
 		/* Currently requesting irq if it's enable in cu config.
@@ -258,6 +281,7 @@ static int cu_probe(struct platform_device *pdev)
 		}
 	}
 
+	printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 	switch (info->model) {
 	case XCU_HLS:
 		err = xrt_cu_hls_init(&zcu->base);
@@ -268,28 +292,37 @@ static int cu_probe(struct platform_device *pdev)
 	default:
 		err = -EINVAL;
 	}
+	printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 	if (err) {
 		DRM_ERROR("Not able to initial CU %p\n", zcu);
 		goto err2;
 	}
+	printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 
 	platform_set_drvdata(pdev, zcu);
 
+	printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 	err = sysfs_create_group(&pdev->dev.kobj, &cu_attrgroup);
 	if (err)
 		zocl_err(&pdev->dev, "create CU attrs failed: %d", err);
 
+	printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 	zcu->base.user_manage_irq = user_manage_irq;
 	zcu->base.configure_irq = configure_irq;
 
+	printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 	return 0;
 err2:
+	printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 	zocl_kds_del_cu(zdev, &zcu->base);
 err1:
+	printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 	vfree(args);
 	vfree(res);
 err:
+	printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 	kfree(zcu);
+	printk("[SAIF_TEST_CU -> %s : %d] : ------\n", __func__, __LINE__);
 	return err;
 }
 

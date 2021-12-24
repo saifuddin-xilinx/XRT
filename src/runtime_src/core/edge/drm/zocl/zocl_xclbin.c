@@ -434,11 +434,13 @@ zocl_destroy_cu_domain(struct drm_zocl_dev *zdev, int domain_idx)
 	struct xrt_cu_info *info;
 	int i;
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	for (i = 0; i < MAX_CU_NUM; ++i) {
 		pldev = zdev->cu_pldev[i];
 		if (!pldev)
 			continue;
 
+		printk("[SAIF_TEST -> %s : %d] ---------cu %d \n", __func__, __LINE__, i);
 		info = dev_get_platdata(&pldev->dev);
 		if (info->domain_idx == domain_idx) {
 			platform_device_del(pldev);
@@ -446,6 +448,7 @@ zocl_destroy_cu_domain(struct drm_zocl_dev *zdev, int domain_idx)
 			zdev->cu_pldev[i] = NULL;
 		}
 	}
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 }
 
 static int
@@ -471,6 +474,7 @@ zocl_create_cu(struct drm_zocl_dev *zdev, struct drm_zocl_domain *domain)
 		if (ip->m_base_address == -1)
 			continue;
 
+		printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 		info.domain_idx = domain->domain_idx;
 		info.num_res = 1;
 		info.addr = ip->m_base_address;
@@ -478,6 +482,7 @@ zocl_create_cu(struct drm_zocl_dev *zdev, struct drm_zocl_domain *domain)
 		info.protocol = xclbin_protocol(ip->properties);
 		info.intr_id = xclbin_intr_id(ip->properties);
 
+		printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 		switch (info.protocol) {
 		case CTRL_HS:
 		case CTRL_CHAIN:
@@ -491,6 +496,7 @@ zocl_create_cu(struct drm_zocl_dev *zdev, struct drm_zocl_domain *domain)
 			goto err;
 		}
 
+		printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 		info.inst_idx = zocl_get_cu_inst_idx(zdev);
 		/* ip_data->m_name format "<kernel name>:<instance name>",
 		 * where instance name is so called CU name.
@@ -499,6 +505,7 @@ zocl_create_cu(struct drm_zocl_dev *zdev, struct drm_zocl_domain *domain)
 		kname_p = &kname[0];
 		strcpy(info.kname, strsep(&kname_p, ":"));
 		strcpy(info.iname, strsep(&kname_p, ":"));
+		printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 
 		/* CU sub device is a virtual device, which means there is no
 		 * device tree nodes
@@ -508,17 +515,19 @@ zocl_create_cu(struct drm_zocl_dev *zdev, struct drm_zocl_domain *domain)
 			DRM_ERROR("cannot create CU subdev");
 			goto err;
 		}
+		printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	}
 
 	return 0;
 err:
-	subdev_destroy_cu(zdev);
+	zocl_destroy_cu_domain(zdev, domain->domain_idx);
 	return err;
 }
 
 static inline bool
 zocl_xclbin_same_uuid(struct drm_zocl_domain *domain, xuid_t *uuid)
 {
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	return (zocl_xclbin_get_uuid(domain) != NULL &&
 	    uuid_equal(uuid, zocl_xclbin_get_uuid(domain)));
 }
@@ -529,11 +538,16 @@ zocl_get_domain(struct drm_zocl_dev *zdev, uuid_t *id)
 	struct drm_zocl_domain *zocl_domain = NULL;
 	int i;
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	for (i = 0; i < zdev->num_pr_domain; i++) {
 		zocl_domain = zdev->pr_domain[i];
 		if (zocl_domain) {
-			if (zocl_xclbin_same_uuid(zocl_domain, id))
+			mutex_lock(&zocl_domain->zdev_xclbin_lock);
+			if (zocl_xclbin_same_uuid(zocl_domain, id)) {
+				mutex_unlock(&zocl_domain->zdev_xclbin_lock);
 				return zocl_domain;
+			}
+			mutex_unlock(&zocl_domain->zdev_xclbin_lock);
 		}
 	}
 
@@ -563,6 +577,7 @@ zocl_xclbin_load_pdi(struct drm_zocl_dev *zdev, void *data,
 	int ret = 0;
 	int count;
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	if (memcmp(axlf_head->m_magic, "xclbin2", 8)) {
 		DRM_INFO("Invalid xclbin magic string");
 		return -EINVAL;
@@ -845,13 +860,26 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 	void *aie_res = 0;
 	uint64_t size = 0;
 	int ret = 0;
+	struct drm_zocl_domain *domain = NULL;
 	int domain_id = axlf_obj->za_domain_id;
-	struct drm_zocl_domain *domain = zdev->pr_domain[domain_id];
 
-	if (!domain) {
-		DRM_ERROR("SLOT[%d] doesn't exists", domain_id);
+	printk("[SAIF_TEST -> %s : %d] : domain id %d\n", __func__, __LINE__,
+	       domain_id);
+	if (domain_id > zdev->num_pr_domain) {
+		DRM_ERROR("Invalid Domain[%d]", domain_id);
 		return -EINVAL;
 	}
+
+	domain = zdev->pr_domain[domain_id];
+	printk("[SAIF_TEST -> %s : %d] : domain id %d\n", __func__, __LINE__,
+	       domain_id);
+
+	if (!domain) {
+		DRM_ERROR("Domain[%d] doesn't exists", domain_id);
+		return -EINVAL;
+	}
+	printk("[SAIF_TEST -> %s : %d] : domain ptr %p\n", __func__, __LINE__,
+	       domain);
 
 	mutex_lock(&domain->zdev_xclbin_lock);
 
@@ -898,26 +926,35 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 	/* After this lock till unlock is an atomic context */
 	write_lock(&zdev->attr_rwlock);
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	/*
 	 * Read AIE_RESOURCES section. aie_res will be NULL if there is no
 	 * such a section.
 	 */
 	zocl_read_sect(AIE_RESOURCES, &aie_res, axlf, xclbin);
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	/* Check unique ID */
 	if (zocl_xclbin_same_uuid(domain, &axlf_head.m_header.uuid)) {
+		printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 		if (!(axlf_obj->za_flags & DRM_ZOCL_FORCE_PROGRAM)) {
+			printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 			if (is_aie_only(axlf)) {
+				printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 				write_unlock(&zdev->attr_rwlock);
 				ret = zocl_load_aie_only_pdi(zdev, axlf, xclbin, client);
 				write_lock(&zdev->attr_rwlock);
+				printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 				if (ret)
 					DRM_WARN("read xclbin: fail to load AIE");
 				else {
+					printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 					write_unlock(&zdev->attr_rwlock);
 					zocl_create_aie(zdev, axlf, aie_res);
 					write_lock(&zdev->attr_rwlock);
+					printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 					zocl_cache_xclbin(domain, axlf, xclbin);
+					printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 				}
 			} else {
 				DRM_INFO("%s The XCLBIN already loaded", __func__);
@@ -930,6 +967,7 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 		}
 	}
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	/* 1. We locked &zdev->zdev_xclbin_lock so that no new contexts
 	 * can be opened and/or closed
 	 * 2. A opened context would lock bitstream and hold it.
@@ -942,6 +980,7 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 		goto out0;
 	}
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 #if 0
 	/* uuid is null means first time load xclbin */
 	if (zocl_xclbin_get_uuid(domain) != NULL) {
@@ -954,8 +993,10 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 	}
 #endif
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	zocl_free_sections(domain);
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 #if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
 	if (xrt_xclbin_get_section_num(axlf, PARTITION_METADATA) &&
 	    axlf_head.m_header.m_mode != XCLBIN_HW_EMU &&
@@ -995,7 +1036,7 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 			  */
 			if (kds_mode == 1 &&
 				(zocl_xclbin_get_uuid(domain) != NULL)) {
-				subdev_destroy_cu(zdev);
+				zocl_destroy_cu_domain(zdev, domain->domain_idx);;
 				if (zdev->aie) {
 					/*
 					 * Dont reset if aie is already in reset
@@ -1056,6 +1097,7 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 			goto out0;
 	}
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	/* Populating IP_LAYOUT sections */
 	/* zocl_read_sect return size of section when successfully find it */
 	size = zocl_read_sect(IP_LAYOUT, &domain->ip, axlf, xclbin);
@@ -1069,6 +1111,7 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 		goto out0;
 	}
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	/* Populating DEBUG_IP_LAYOUT sections */
 	size = zocl_read_sect(DEBUG_IP_LAYOUT, &domain->debug_ip, axlf, xclbin);
 	if (size <= 0) {
@@ -1081,10 +1124,13 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 		goto out0;
 	}
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	ret = zocl_update_apertures(zdev, domain);
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	if (ret)
 		goto out0;
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	/* SAIF TODO : Question ? Need to discuss about the kernels. Currently considering
 	 * it as a domain specific. */
 	if (domain->kernels != NULL) {
@@ -1093,20 +1139,29 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 		domain->ksize = 0;
 	}
 
+	printk("[SAIF_TEST -> %s : %d] --------- ksize %d\n", __func__, __LINE__, axlf_obj->za_ksize);
 	if (axlf_obj->za_ksize > 0) {
+		printk("[SAIF_TEST -> %s : %d] --------- %d \n", __func__, __LINE__, axlf_obj->za_ksize);
 		kernels = vmalloc(axlf_obj->za_ksize);
 		if (!kernels) {
 			ret = -ENOMEM;
+			printk("[SAIF_TEST_ERROR -> %s : %d] ---------\n", __func__, __LINE__);
 			goto out0;
 		}
+		printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 		if (copy_from_user(kernels, axlf_obj->za_kernels,
 		    axlf_obj->za_ksize)) {
 			ret = -EFAULT;
+			printk("[SAIF_TEST_ERROR -> %s : %d] ---------\n", __func__, __LINE__);
 			goto out0;
 		}
+		printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 		domain->ksize = axlf_obj->za_ksize;
+		printk("[SAIF_TEST -> %s : %d] ---------%d ksize \n", __func__, __LINE__, domain->ksize);
 		domain->kernels = kernels;
+		printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	}
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 
 	/* Populating AIE_METADATA sections */
 	size = zocl_read_sect(AIE_METADATA, &domain->aie_data.data, axlf,
@@ -1117,6 +1172,7 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 	}
 	domain->aie_data.size = size;
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	/* Populating CONNECTIVITY sections */
 	size = zocl_read_sect(CONNECTIVITY, &domain->connectivity, axlf, xclbin);
 	if (size <= 0) {
@@ -1129,6 +1185,7 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 		goto out0;
 	}
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	/* Populating MEM_TOPOLOGY sections */
 	size = zocl_read_sect(MEM_TOPOLOGY, &domain->topology, axlf, xclbin);
 	if (size <= 0) {
@@ -1141,20 +1198,25 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 		goto out0;
 	}
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	zocl_clear_mem_domain(zdev, domain->domain_idx);
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	zocl_init_mem(zdev, domain);
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	/* Createing AIE Partition */
 	write_unlock(&zdev->attr_rwlock);
 	zocl_create_aie(zdev, axlf, aie_res);
 	write_lock(&zdev->attr_rwlock);
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	/*
 	 * Remember xclbin_uuid for opencontext.
 	 */
 	domain->zdev_xclbin->zx_refcnt = 0;
 	zocl_xclbin_set_uuid(domain, &axlf_head.m_header.uuid);
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	if (kds_mode == 1) {
 		/*
 		 * Invoking kernel thread (kthread), hence need
@@ -1168,23 +1230,30 @@ zocl_xclbin_read_axlf(struct drm_zocl_dev *zdev, struct drm_zocl_axlf *axlf_obj,
 		 * */
 		//(void) zocl_kds_reset(zdev);
 		/* Destroy the CUs specific for this domain */
+		printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 		zocl_destroy_cu_domain(zdev, domain->domain_idx);
 
+		printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 		/* Create the CUs for this domain */
 		ret = zocl_create_cu(zdev, domain);
+		printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 		if (ret) {
 			write_lock(&zdev->attr_rwlock);
 			goto out0;
 		}
 
+		printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 		ret = zocl_kds_update(zdev, domain, &axlf_obj->kds_cfg);
+		printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 		if (ret) {
 			write_lock(&zdev->attr_rwlock);
 			goto out0;
 		}
+		printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 
 		write_lock(&zdev->attr_rwlock);
 	}
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 
 out0:
 	write_unlock(&zdev->attr_rwlock);
@@ -1199,7 +1268,13 @@ out0:
 void *
 zocl_xclbin_get_uuid(struct drm_zocl_domain *domain)
 {
+	printk("[SAIF_TEST -> %s : %d] --------- is locked %d\n", __func__, __LINE__, 
+	       mutex_is_locked(&domain->zdev_xclbin_lock));
 	BUG_ON(!mutex_is_locked(&domain->zdev_xclbin_lock));
+
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
+	if (!domain->zdev_xclbin)
+		return NULL;
 
 	return domain->zdev_xclbin->zx_uuid;
 }
@@ -1284,76 +1359,6 @@ int zocl_unlock_bitstream(struct drm_zocl_domain *domain, const uuid_t *id)
 	return ret;
 }
 
-#if 0
-int
-zocl_graph_alloc_ctx(struct drm_zocl_dev *zdev, struct drm_zocl_ctx *ctx,
-        struct sched_client_ctx *client)
-{
-	xuid_t *zdev_xuid, *ctx_xuid;
-	u32 gid = ctx->graph_id;
-	u32 flags = ctx->flags;
-	int ret;
-
-	mutex_lock(&zdev->zdev_xclbin_lock);
-
-	ctx_xuid = vmalloc(ctx->uuid_size);
-	if (!ctx_xuid) {
-		mutex_unlock(&zdev->zdev_xclbin_lock);
-		return -ENOMEM;
-	}
-
-	ret = copy_from_user(ctx_xuid, (void *)(uintptr_t)ctx->uuid_ptr,
-	    ctx->uuid_size);
-	if (ret)
-		goto out;
-
-	zdev_xuid = (xuid_t *)zdev->zdev_xclbin->zx_uuid;
-
-	if (!zdev_xuid || !uuid_equal(zdev_xuid, ctx_xuid)) {
-		DRM_ERROR("try to allocate Graph CTX with wrong xclbin %pUB",
-		    ctx_xuid);
-		ret = -EINVAL;
-		goto out;
-	}
-
-	ret = zocl_aie_graph_alloc_context(zdev, gid, flags, client);
-out:
-	mutex_unlock(&zdev->zdev_xclbin_lock);
-	vfree(ctx_xuid);
-	return ret;
-}
-
-int
-zocl_graph_free_ctx(struct drm_zocl_dev *zdev, struct drm_zocl_ctx *ctx,
-        struct sched_client_ctx *client)
-{
-	u32 gid = ctx->graph_id;
-	int ret;
-
-	mutex_lock(&zdev->zdev_xclbin_lock);
-	ret = zocl_aie_graph_free_context(zdev, gid, client);
-	mutex_unlock(&zdev->zdev_xclbin_lock);
-
-	return ret;
-}
-
-int
-zocl_aie_alloc_ctx(struct drm_zocl_dev *zdev, struct drm_zocl_ctx *ctx,
-        struct sched_client_ctx *client)
-{
-	u32 flags = ctx->flags;
-
-	return zocl_aie_alloc_context(zdev, flags, client);
-}
-
-int
-zocl_aie_free_ctx(struct drm_zocl_dev *zdev, struct drm_zocl_ctx *ctx,
-        struct sched_client_ctx *client)
-{
-	return zocl_aie_free_context(zdev, client);
-}
-#endif
-
 int
 zocl_xclbin_set_uuid(struct drm_zocl_domain *domain, void *uuid)
 {
@@ -1374,35 +1379,40 @@ zocl_xclbin_set_uuid(struct drm_zocl_domain *domain, void *uuid)
 }
 
 int
-zocl_xclbin_init(struct zocl_xclbin *zdev_xclbin)
+zocl_xclbin_init(struct drm_zocl_domain *domain)
 {
-	zdev_xclbin = vmalloc(sizeof(struct zocl_xclbin));
-	if (!zdev_xclbin) {
+	struct zocl_xclbin *z_xclbin = NULL;
+
+	z_xclbin = vmalloc(sizeof(struct zocl_xclbin));
+	if (!z_xclbin) {
 		DRM_ERROR("Alloc zdev_xclbin failed: no memory\n");
 		return -ENOMEM;
 	}
 
-	zdev_xclbin->zx_refcnt = 0;
-	zdev_xclbin->zx_uuid = NULL;
+	z_xclbin->zx_refcnt = 0;
+	z_xclbin->zx_uuid = NULL;
+
+	domain->zdev_xclbin = z_xclbin;
 
 	return 0;
 }
 
 void
-zocl_xclbin_fini(struct zocl_xclbin *zdev_xclbin)
+zocl_xclbin_fini(struct drm_zocl_dev *zdev, struct drm_zocl_domain *domain)
 {
-	vfree(zdev_xclbin->zx_uuid);
-	zdev_xclbin->zx_uuid = NULL;
-	vfree(zdev_xclbin);
-	zdev_xclbin = NULL;
+	if (!domain->zdev_xclbin)
+		return;
 
-	/* SAIF TODO : Why we need to destroy CU here
-	 * Move it to other place
-	 */
-#if 0
-	/* Delete CU devices if exist */
-	subdev_destroy_cu(zdev);
-#endif
+	printk("SAIF : -------- %s %d -------------\n", __func__, __LINE__);
+	vfree(domain->zdev_xclbin->zx_uuid);
+	domain->zdev_xclbin->zx_uuid = NULL;
+	printk("SAIF : -------- %s %d -------------\n", __func__, __LINE__);
+	vfree(domain->zdev_xclbin);
+	domain->zdev_xclbin = NULL;
+	printk("SAIF : -------- %s %d -------------\n", __func__, __LINE__);
+
+	/* Delete CU devices if exist for this domain */
+	zocl_destroy_cu_domain(zdev, domain->domain_idx);
 }
 
 bool

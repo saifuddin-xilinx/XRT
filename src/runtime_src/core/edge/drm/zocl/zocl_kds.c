@@ -95,24 +95,59 @@ zocl_ctx_to_info(struct drm_zocl_ctx *args, struct kds_ctx_info *info)
 		info->flags = CU_CTX_SHARED;
 }
 
+static void
+zocl_remove_client_context(struct drm_zocl_dev *zdev,
+			struct kds_client *client, struct client_ctx *cctx)
+{
+	struct drm_zocl_domain *domain;
+	uuid_t *id = (uuid_t *)cctx->xclbin_id;
+
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
+	/* Check whether active count exists for this context */
+	if (cctx && !cctx->num_ctx) {
+		printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
+		/* Get the corresponding domain for this xclbin */
+		domain = zocl_get_domain(zdev, id);
+		if (!domain)
+			return;
+
+		printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
+		/* Unlock this domain specific xclbin */
+		zocl_unlock_bitstream(domain, id);
+
+		printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
+		list_del(&cctx->link);
+		printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
+		if (cctx->xclbin_id)
+			vfree(cctx->xclbin_id);
+		printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
+		if (cctx)
+			vfree(cctx);
+		printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
+	}
+}
+
 static struct client_ctx *
-zocl_add_client_context(struct drm_zocl_dev *zdev,
+zocl_create_client_context(struct drm_zocl_dev *zdev,
 			struct kds_client *client, uuid_t *id)
 {
 	struct drm_zocl_domain *domain;
 	struct client_ctx *cctx;
 	int ret;
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	/* Get the corresponding domain for this xclbin */
 	domain = zocl_get_domain(zdev, id);
 	if (!domain)
 		return NULL;
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	/* Lock this domain specific xclbin */
 	ret = zocl_lock_bitstream(domain, id);
 	if (ret)
 		return NULL;
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	/* Allocate the new client context and store the xclbin */
 	cctx = vzalloc(sizeof(struct client_ctx));
 	if (!cctx) {
@@ -120,6 +155,7 @@ zocl_add_client_context(struct drm_zocl_dev *zdev,
 		return NULL;
 	}
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	cctx->xclbin_id = vzalloc(sizeof(uuid_t));
 	if (!cctx->xclbin_id) {
 		vfree(cctx);
@@ -128,37 +164,28 @@ zocl_add_client_context(struct drm_zocl_dev *zdev,
 	}
 	uuid_copy(cctx->xclbin_id, id);
 
-	list_add(&cctx->link, &client->ctx_list);
+	printk("[SAIF_TEST -> %s : %d] --------- curr ctx %p\n", __func__, __LINE__, cctx);
+	list_add_tail(&cctx->link, &client->ctx_list);
 
 	return cctx;
 }
 
-static int
-zocl_del_client_context(struct drm_zocl_dev *zdev,
-                        struct kds_client *client, uuid_t *id)
+static struct client_ctx *
+zocl_check_exists_context(struct kds_client *client, uuid_t *id)
 {
-	struct drm_zocl_domain *domain;
 	struct client_ctx *curr;
 
-	/* Freeup the allocated memory */
-	list_for_each_entry(curr, &client->ctx_list, link) {
-		if (uuid_equal(curr->xclbin_id, id) && !curr->num_ctx) {
-			list_del(&curr->link);
-			if (curr->xclbin_id)
-				vfree(curr->xclbin_id);
-			if (curr)
-				vfree(curr);
-			curr = NULL;
-		}
-	}
+	/* Find whether the xclbin is already loaded and the context is exists
+	 */
+	list_for_each_entry(curr, &client->ctx_list, link)
+		if (uuid_equal(curr->xclbin_id, id))
+			break;
 
-	/* Get the corresponding domain for this xclbin */
-	domain = zocl_get_domain(zdev, id);
-	if (!domain)
-		return -EINVAL;
+	/* Not found any matching context */
+	if (&curr->link == &client->ctx_list)
+		return NULL;
 
-	/* Unlock this domain specific xclbin */
-	return zocl_unlock_bitstream(domain, id);
+	return curr;
 }
 
 static int
@@ -167,7 +194,7 @@ zocl_add_context(struct drm_zocl_dev *zdev, struct kds_client *client,
 {
 	struct kds_ctx_info info;
 	void *uuid_ptr = (void *)(uintptr_t)args->uuid_ptr;
-	struct client_ctx *curr;
+	struct client_ctx *cctx;
 	uuid_t *id;
 	int ret;
 
@@ -182,18 +209,12 @@ zocl_add_context(struct drm_zocl_dev *zdev, struct kds_client *client,
 	}
 
 	mutex_lock(&client->lock);
-	/* Find whether the xclbin is already loaded and the context is exists
-	 */
-	list_for_each_entry(curr, &client->ctx_list, link) {
-		if (uuid_equal(curr->xclbin_id, id))
-			break;
-	}
 
-	/* Not found any matching context */
-	if (&curr->link == &client->ctx_list) {
-		/* Add a new context to this client */
-		curr = zocl_add_client_context(zdev, client, id);
-		if (curr == NULL)
+	cctx = zocl_check_exists_context(client, id);
+	if (cctx == NULL) {
+		/* No existing context found. Create a new context to this client */
+		cctx = zocl_create_client_context(zdev, client, id);
+		if (cctx == NULL)
 			goto out;
 	}
 
@@ -203,10 +224,10 @@ zocl_add_context(struct drm_zocl_dev *zdev, struct kds_client *client,
 	zocl_ctx_to_info(args, &info);
 
 	/* Store the current context here. KDS required that later */
-	info.curr_ctx = (void *)curr;
+	info.curr_ctx = (void *)cctx;
 	ret = kds_add_context(&zdev->kds, client, &info);
 	if (ret) {
-		zocl_del_client_context(zdev, client, id);
+		zocl_remove_client_context(zdev, client, cctx);
 		goto out;
 	}
 
@@ -223,7 +244,7 @@ zocl_del_context(struct drm_zocl_dev *zdev, struct kds_client *client,
 	struct kds_ctx_info info;
 	void *uuid_ptr = (void *)(uintptr_t)args->uuid_ptr;
 	uuid_t *id;
-	struct client_ctx *curr;
+	struct client_ctx *cctx;
 	int ret;
 
 	id = vmalloc(sizeof(uuid_t));
@@ -237,16 +258,8 @@ zocl_del_context(struct drm_zocl_dev *zdev, struct kds_client *client,
 	}
 
 	mutex_lock(&client->lock);
-
-	/* Find whether the xclbin is already loaded and the context is exists
-	 */
-	list_for_each_entry(curr, &client->ctx_list, link) {
-		if (uuid_equal(curr->xclbin_id, id))
-			break;
-	}
-
-	/* Not found any matching context */
-	if (&curr->link == &client->ctx_list) {
+	cctx = zocl_check_exists_context(client, id);
+	if (cctx == NULL) {
 		ret = -EINVAL;
 		goto out;
 	}
@@ -254,13 +267,13 @@ zocl_del_context(struct drm_zocl_dev *zdev, struct kds_client *client,
 	zocl_ctx_to_info(args, &info);
 
 	/* Store the current context here. KDS required that later */
-	info.curr_ctx = (void *)curr;
+	info.curr_ctx = (void *)cctx;
 	ret = kds_del_context(&zdev->kds, client, &info);
 	if (ret)
 		goto out;
 
-	/* Delete the current client context for this domain only */
-	zocl_del_client_context(zdev, client, id);
+	/* Delete the current client context */
+	zocl_remove_client_context(zdev, client, cctx);
 
 out:
 	mutex_unlock(&client->lock);
@@ -453,6 +466,7 @@ zocl_get_cu_context(struct drm_zocl_dev *zdev, struct kds_client *client,
 	domain = zdev->pr_domain[domain_idx];
 	if (domain) {
 		struct client_ctx *curr;
+		mutex_lock(&domain->zdev_xclbin_lock);
 		list_for_each_entry(curr, &client->ctx_list, link) {
 			if (uuid_equal(curr->xclbin_id,
 				       zocl_xclbin_get_uuid(domain))) {
@@ -460,6 +474,7 @@ zocl_get_cu_context(struct drm_zocl_dev *zdev, struct kds_client *client,
 				break;
 			}
 		}
+		mutex_unlock(&domain->zdev_xclbin_lock);
 
 		/* check matching context */
 		if (&curr->link != &client->ctx_list) {

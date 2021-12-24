@@ -110,7 +110,8 @@ static int zocl_pr_domain_init(struct drm_zocl_dev *zdev,
 	 * for this device then consider it for a single domain device for
 	 * backward compartability.
 	 */
-	zdev->num_pr_domain = 1;
+	if (zdev->num_pr_domain == 0)
+		zdev->num_pr_domain = 1;
 
 	for (i = 0; i < zdev->num_pr_domain; i++) {
 		zocl_domain = (struct drm_zocl_domain *)
@@ -119,7 +120,7 @@ static int zocl_pr_domain_init(struct drm_zocl_dev *zdev,
 			return -ENOMEM;
 
 		/* Initial xclbin */
-		ret = zocl_xclbin_init(zocl_domain->zdev_xclbin);
+		ret = zocl_xclbin_init(zocl_domain);
 		if (ret)
 			return ret;
 
@@ -172,15 +173,21 @@ static void zocl_pr_domain_fini(struct drm_zocl_dev *zdev)
 	struct drm_zocl_domain *zocl_domain = NULL;
 	int i;
 
+	printk("SAIF : -------- %s %d -------------\n", __func__, __LINE__);
 	for (i = 0; i < zdev->num_pr_domain; i++) {
+		printk("SAIF : -------- %s %d i : %d-------------\n", __func__, __LINE__, i);
 		zocl_domain = zdev->pr_domain[i];
 		if (zocl_domain) {
+			printk("SAIF : -------- %s %d -------------\n", __func__, __LINE__);
 			zocl_free_sections(zocl_domain);
 			mutex_destroy(&zocl_domain->zdev_xclbin_lock);
-			zocl_xclbin_fini(zocl_domain->zdev_xclbin);
-			vfree(zocl_domain);
+			zocl_xclbin_fini(zdev, zocl_domain);
+			printk("SAIF : -------- %s %d -------------\n", __func__, __LINE__);
+			kfree(zocl_domain);
 			zdev->pr_domain[i] = NULL;
+			printk("SAIF : -------- %s %d -------------\n", __func__, __LINE__);
 		}
+		printk("SAIF : -------- %s %d -------------\n", __func__, __LINE__);
 	}
 }
 
@@ -338,6 +345,8 @@ int subdev_create_cu(struct drm_zocl_dev *zdev, struct xrt_cu_info *info)
 		return -ENOMEM;
 	}
 
+	printk("[SAIF_TEST -> %s : %d] --------- domain %d kname : %s \n", __func__,
+	       __LINE__, info->domain_idx, info->kname);
 	krnl_info = zocl_query_kernel(zdev->pr_domain[info->domain_idx],
 				     info->kname);
 	if(!krnl_info) {
@@ -888,9 +897,15 @@ static int zocl_drm_platform_probe(struct platform_device *pdev)
 		zdev->host_mem_len = resource_size(&res_mem);
 	}
 
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	mutex_init(&zdev->mm_lock);
 	/* Initialize zocl memory head */
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
 	INIT_LIST_HEAD(&zdev->zm_list_head);
+	printk("[SAIF_TEST -> %s : %d] ---------\n", __func__, __LINE__);
+	printk("[SAIF_TEST -> %s : %d] --------- list head %p \n",
+	       __func__, __LINE__, &zdev->zm_list_head);
+
 
 	subdev = zocl_find_pdev("ert_hw");
 	if (subdev) {
@@ -1028,35 +1043,45 @@ static int zocl_drm_platform_remove(struct platform_device *pdev)
 	struct drm_zocl_dev *zdev = platform_get_drvdata(pdev);
 	struct drm_device *drm = zdev->ddev;
 
+	printk("SAIF : -------- %s %d -------------\n", __func__, __LINE__);
 	if (zdev->domain) {
 		iommu_detach_device(zdev->domain, drm->dev);
 		iommu_domain_free(zdev->domain);
 	}
 
+	printk("SAIF : -------- %s %d -------------\n", __func__, __LINE__);
 	/* If dma channel has been requested, make sure it is released */
 	if (zdev->zdev_dma_chan) {
 		dma_release_channel(zdev->zdev_dma_chan);
 		zdev->zdev_dma_chan = NULL;
 	}
 
+	printk("SAIF : -------- %s %d -------------\n", __func__, __LINE__);
 	if (zdev->fpga_mgr)
 		fpga_mgr_put(zdev->fpga_mgr);
 
+	printk("SAIF : -------- %s %d -------------\n", __func__, __LINE__);
 	zocl_clear_mem(zdev);
 	mutex_destroy(&zdev->mm_lock);
+	printk("SAIF : -------- %s %d -------------\n", __func__, __LINE__);
 	zocl_pr_domain_fini(zdev);
 	zocl_destroy_aie(zdev);
+	printk("SAIF : -------- %s %d -------------\n", __func__, __LINE__);
 	mutex_destroy(&zdev->aie_lock);
 	zocl_fini_sysfs(drm->dev);
 	zocl_fini_error(zdev);
 
 	zocl_fini_sched(zdev);
 
-	kfree(zdev->apertures);
+	printk("SAIF : -------- %s %d -------------\n", __func__, __LINE__);
+	if (zdev->apertures)
+		kfree(zdev->apertures);
 
 	drm_dev_unregister(drm);
+	printk("SAIF : -------- %s %d -------------\n", __func__, __LINE__);
 	ZOCL_DRM_DEV_PUT(drm);
 
+	printk("SAIF : -------- %s %d -------------\n", __func__, __LINE__);
 	return 0;
 }
 
