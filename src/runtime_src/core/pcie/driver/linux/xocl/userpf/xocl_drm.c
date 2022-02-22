@@ -650,54 +650,91 @@ void xocl_mm_update_usage_stat(struct xocl_drm *drm_p, u32 ddr,
 	drm_p->mm_usage_stat[ddr]->bo_count += count;
 }
 
-int xocl_mm_insert_node_range(struct xocl_drm *drm_p, u32 mem_id,
-			      struct drm_mm_node *node, u64 size)
+static int xocl_mm_insert_node_range_ps_kernel(struct xocl_drm *drm_p, u32 mem_id,
+		struct mem_topology *grp_topology, struct drm_mm_node *node, u64 size)
 {
 	uint64_t start_addr = 0;
 	uint64_t end_addr = 0;
-	struct mem_topology *grp_topology = NULL;
-	int err = 0;
-	BUG_ON(!mutex_is_locked(&drm_p->mm_lock));
+	uint64_t hash_start_addr = 0;
+	int ret = 0;
+	int i = 0;
 
-	err = XOCL_GET_GROUP_TOPOLOGY(drm_p->xdev, grp_topology);
-	if (err)
-		return 0;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 7, 0)
+	for (i = 0; i < grp_topology->m_count; i++) {
+		hash_start_addr = grp_topology->m_mem_data[i].m_base_address;
+		hash_for_each_possible(drm_p->mm_range, wrapper, h_node, hash_start_addr) {
+			if (!wrapper)
+				continue;
 
-	if (drm_p->mm == NULL) {
-		err = -EINVAL;
-		goto out;
-	}
+			start_addr = wrapper->start_addr;
+			end_addr = wrapper->start_addr + wrapper->size;
+
+#if defined(XOCL_DRM_FREE_MALLOC)
+			ret = drm_mm_insert_node_in_range(drm_p->mm, node, size, PAGE_SIZE, 0,
+					start_addr, end_addr, 0);
+#else
+			ret = drm_mm_insert_node_in_range(drm_p->mm, node, size, PAGE_SIZE,
+					start_addr, end_addr, 0);
+#endif
+
+			if (!ret) 
+				/* Found the memory. Return it from here  */
+				return 0;
+		}
+	}	
+#endif
+
+	return ret;
+}
+
+
+static int xocl_mm_insert_node_range(struct xocl_drm *drm_p, u32 mem_id,
+		struct mem_topology *grp_topology, struct drm_mm_node *node, u64 size)
+{
+	uint64_t start_addr = 0;
+	uint64_t end_addr = 0;
+	int ret = 0;
 
 	start_addr = grp_topology->m_mem_data[mem_id].m_base_address;
 	end_addr = start_addr + grp_topology->m_mem_data[mem_id].m_size * 1024;
 
 #if defined(XOCL_DRM_FREE_MALLOC)
-	err = drm_mm_insert_node_in_range(drm_p->mm, node, size, PAGE_SIZE, 0,
+	ret = drm_mm_insert_node_in_range(drm_p->mm, node, size, PAGE_SIZE, 0,
 					   start_addr, end_addr, 0);
 #else
-	err = drm_mm_insert_node_in_range(drm_p->mm, node, size, PAGE_SIZE,
+	ret = drm_mm_insert_node_in_range(drm_p->mm, node, size, PAGE_SIZE,
 					   start_addr, end_addr, 0);
 #endif
 
-out:
-	XOCL_PUT_GROUP_TOPOLOGY(drm_p->xdev);
-	return err;
-
+	return ret;
 }
 
-int xocl_mm_insert_node(struct xocl_drm *drm_p, u32 ddr,
+int xocl_mm_insert_node(struct xocl_drm *drm_p, u32 mem_id,
 			struct drm_mm_node *node, u64 size)
 {
+	int ret = 0;
+	struct mem_topology *grp_topology = NULL;
+	
 	BUG_ON(!mutex_is_locked(&drm_p->mm_lock));
-	if (drm_p->mm == NULL)
-		return -EINVAL;
+        if (drm_p->mm == NULL)
+                return -EINVAL;
 
-	return drm_mm_insert_node_generic(drm_p->mm, node, size, PAGE_SIZE,
-#if defined(XOCL_DRM_FREE_MALLOC)
-		0, 0);
-#else
-		0, 0, 0);
-#endif
+	ret = XOCL_GET_GROUP_TOPOLOGY(drm_p->xdev, grp_topology);
+        if (ret)
+                return 0;
+
+	if (grp_topology->m_mem_data[mem_id].m_type == MEM_PS_KERNEL) {
+		ret = xocl_mm_insert_node_range_ps_kernel(drm_p, mem_id, 
+				grp_topology, node, size);
+	}
+	else {
+		ret = xocl_mm_insert_node_range(drm_p, mem_id,
+				grp_topology, node, size);
+	}
+
+        XOCL_PUT_GROUP_TOPOLOGY(drm_p->xdev);
+        return ret;
+
 }
 
 int xocl_check_topology(struct xocl_drm *drm_p)
@@ -1023,6 +1060,9 @@ int xocl_init_mem(struct xocl_drm *drm_p)
 		if (XOCL_IS_STREAM(topo, i))
 			continue;
 
+		if (XOCL_IS_PS_KERNEL_MEM(topo, i))
+			continue;
+
 		if (!is_mem_region_valid(drm_p, mem_data))
 			continue;
 
@@ -1041,6 +1081,15 @@ int xocl_init_mem(struct xocl_drm *drm_p)
 			reserved_start = reserved_end - reserved1 - reserved2;
 			xocl_info(drm_p->ddev->dev, "  reserved region:0x%llx - 0x%llx",
 				reserved_start, reserved_end - 1);
+		}
+
+		if (IS_HOST_MEM(mem_data->m_tag)) {
+			err = xocl_set_cma_bank(drm_p, mem_data->m_base_address, ddr_bank_size);
+			if (err) {
+				xocl_err(drm_p->ddev->dev, "Run host_mem to setup host memory access, request 0x%lx bytes", ddr_bank_size);
+				goto done;
+			}
+			continue;
 		}
 
 		shared = xocl_get_shared_ddr(drm_p, mem_data);
@@ -1062,24 +1111,16 @@ int xocl_init_mem(struct xocl_drm *drm_p)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 7, 0)
 		hash_add(drm_p->mm_range, &wrapper->node, wrapper->start_addr);
 #endif
-
-		if (IS_HOST_MEM(mem_data->m_tag)) {
-			err = xocl_set_cma_bank(drm_p, mem_data->m_base_address, ddr_bank_size);
-			if (err) {
-				xocl_err(drm_p->ddev->dev, "Run host_mem to setup host memory access, request 0x%lx bytes", ddr_bank_size);
-				goto done;
-			}
-		}
 	}
 
-    drm_p->mm = vzalloc(sizeof(struct drm_mm));
+	drm_p->mm = vzalloc(sizeof(struct drm_mm));
 	if (!drm_p->mm) {
 		err = -ENOMEM;
 		goto done;
 	}
 
-    drm_mm_init(drm_p->mm, mm_start_addr, (mm_end_addr - mm_start_addr));
-    xocl_info(drm_p->ddev->dev, "drm_mm_init called for the available memory range");
+	drm_mm_init(drm_p->mm, mm_start_addr, (mm_end_addr - mm_start_addr));
+	xocl_info(drm_p->ddev->dev, "drm_mm_init called for the available memory range");
 
 done:
 	if (err)
