@@ -492,8 +492,11 @@ struct shim : public DeviceType
   xclGraphHandle
   open_graph(const xuid_t uuid, const char *gname, xrt::graph::access_mode am) override
   {
-    if (auto ghdl = xclGraphOpen(DeviceType::get_device_handle(), uuid, gname, am))
+    printf ("************** SAIF (%s: %s: %d) >>>> Enterning ***************\n", __FILE__, __func__, __LINE__);
+    if (auto ghdl = xclGraphOpen(DeviceType::get_device_handle(), uuid, gname, am)) {
+      printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
       return ghdl;
+    }
 
     throw system_error(EINVAL, "failed to open graph");
   }
@@ -501,7 +504,10 @@ struct shim : public DeviceType
   void
   close_graph(xclGraphHandle handle) override
   {
-    return xclGraphClose(handle);
+    printf ("************** SAIF (%s: %s: %d) >>>> Enterning ***************\n", __FILE__, __func__, __LINE__);
+    xclGraphClose(handle);
+    printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
+    return;
   }
 
   void
@@ -520,21 +526,30 @@ struct shim : public DeviceType
   void
   run_graph(xclGraphHandle handle, int iterations) override
   {
-    if (auto ret = xclGraphRun(handle, iterations))
+    printf ("************** SAIF (%s: %s: %d) >>>> Enterning ***************\n", __FILE__, __func__, __LINE__);
+    if (auto ret = xclGraphRun(handle, iterations)) {
+      printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
       throw system_error(ret, "fail to run graph");
+    }
   }
 
   int
   wait_graph_done(xclGraphHandle handle, int timeout) override
   {
-    return xclGraphWaitDone(handle, timeout);
+    printf ("************** SAIF (%s: %s: %d) >>>> Enterning ***************\n", __FILE__, __func__, __LINE__);
+    int ret = xclGraphWaitDone(handle, timeout);
+    printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
+    return ret;
   }
 
   void
   wait_graph(xclGraphHandle handle, uint64_t cycle) override
   {
-    if (auto ret = xclGraphWait(handle, cycle))
+    printf ("************** SAIF (%s: %s: %d) >>>> Enterning ***************\n", __FILE__, __func__, __LINE__);
+    if (auto ret = xclGraphWait(handle, cycle)) {
+      printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
       throw system_error(ret, "fail to wait graph");
+    }
   }
 
   void
@@ -554,8 +569,11 @@ struct shim : public DeviceType
   void
   end_graph(xclGraphHandle handle, uint64_t cycle) override
   {
-    if (auto ret = xclGraphEnd(handle, cycle))
+    printf ("************** SAIF (%s: %s: %d) >>>> Enterning ***************\n", __FILE__, __func__, __LINE__);
+    if (auto ret = xclGraphEnd(handle, cycle)) {
+      printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
       throw system_error(ret, "fail to end graph");
+    }
   }
 
   void
@@ -575,8 +593,11 @@ struct shim : public DeviceType
   void
   open_aie_context(xrt::aie::access_mode am) override
   {
-    if (auto ret = xclAIEOpenContext(DeviceType::get_device_handle(), am))
+    printf ("************** SAIF (%s: %s: %d) >>>> Enterning ***************\n", __FILE__, __func__, __LINE__);
+    if (auto ret = xclAIEOpenContext(DeviceType::get_device_handle(), am)) {
+      printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
       throw error(ret, "fail to open aie context");
+    }
   }
 
   void

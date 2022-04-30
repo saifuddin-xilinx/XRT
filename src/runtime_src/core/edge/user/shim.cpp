@@ -1702,6 +1702,7 @@ openGraphContext(const uuid_t xclbinId, unsigned int graphId, xrt::graph::access
   unsigned int flags;
   int ret;
 
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   switch (am) {
 
   case xrt::graph::access_mode::exclusive:
@@ -1728,6 +1729,7 @@ openGraphContext(const uuid_t xclbinId, unsigned int graphId, xrt::graph::access
   ctx.op = ZOCL_CTX_OP_ALLOC_GRAPH_CTX;
 
   ret = ioctl(mKernelFD, DRM_IOCTL_ZOCL_CTX, &ctx);
+  printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
   return ret ? -errno : ret;
 }
 
@@ -1737,11 +1739,13 @@ closeGraphContext(unsigned int graphId)
 {
   int ret;
 
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   drm_zocl_ctx ctx = {0};
   ctx.graph_id = graphId;
   ctx.op = ZOCL_CTX_OP_FREE_GRAPH_CTX;
 
   ret = ioctl(mKernelFD, DRM_IOCTL_ZOCL_CTX, &ctx);
+  printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
   return ret ? -errno : ret;
 }
 
@@ -1752,6 +1756,7 @@ openAIEContext(xrt::aie::access_mode am)
   unsigned int flags;
   int ret;
 
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   switch (am) {
 
   case xrt::aie::access_mode::exclusive:
@@ -1775,6 +1780,7 @@ openAIEContext(xrt::aie::access_mode am)
   ctx.op = ZOCL_CTX_OP_ALLOC_AIE_CTX;
 
   ret = ioctl(mKernelFD, DRM_IOCTL_ZOCL_CTX, &ctx);
+  printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
   return ret ? -errno : ret;
 }
 

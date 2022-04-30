@@ -32,15 +32,19 @@ namespace zynqaie {
 
 Aied::Aied(xrt_core::device* device): mCoreDevice(device)
 {
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   done = false;
   pthread_create(&ptid, NULL, &Aied::pollAIE, this);
+  printf ("************** SAIF (%s: %s: %d) <<<< Retunring ***************\n", __FILE__, __func__, __LINE__);
 }
 
 Aied::~Aied()
 {
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   done = true;
   pthread_kill(ptid, SIGUSR1);
   pthread_join(ptid, NULL);
+  printf ("************** SAIF (%s: %s: %d) <<<< Retunring ***************\n", __FILE__, __func__, __LINE__);
 }
 
 /* Dummy signal handler for SIGTERM */
@@ -96,12 +100,16 @@ Aied::pollAIE(void* arg)
 void
 Aied::registerGraph(const graph_type *graph)
 {
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   mGraphs.push_back(graph);
+  printf ("************** SAIF (%s: %s: %d) <<<< Retunring ***************\n", __FILE__, __func__, __LINE__);
 }
 
 void
 Aied::deregisterGraph(const graph_type *graph)
 {
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   mGraphs.erase(std::remove(mGraphs.begin(), mGraphs.end(), graph), mGraphs.end());
+  printf ("************** SAIF (%s: %s: %d) <<<< Retunring ***************\n", __FILE__, __func__, __LINE__);
 }
 }

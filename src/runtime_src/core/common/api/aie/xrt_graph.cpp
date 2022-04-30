@@ -48,16 +48,21 @@ public:
   graph_impl(std::shared_ptr<xrt_core::device> dev, xclGraphHandle ghdl)
     : device(std::move(dev))
     , handle(ghdl)
-  {}
+  {
+    printf ("************** SAIF (%s: %s: %d) ***************\n", __FILE__, __func__, __LINE__);
+  }
 
   ~graph_impl()
   {
+    printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
     device->close_graph(handle);
+    printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
   }
 
   xclGraphHandle
   get_handle() const
   {
+    printf ("************** SAIF (%s: %s: %d) ***************\n", __FILE__, __func__, __LINE__);
     return handle;
   }
 
@@ -76,19 +81,27 @@ public:
   void
   run(int iterations)
   {
+    printf ("************** SAIF (%s: %s: %d) ***************\n", __FILE__, __func__, __LINE__);
     device->run_graph(handle, iterations);
+    printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
   }
 
   int
   wait(int timeout)
-  {
-    return (device->wait_graph_done(handle, timeout));
+  { 
+    int ret;
+    printf ("************** SAIF (%s: %s: %d) ***************\n", __FILE__, __func__, __LINE__);
+    ret = device->wait_graph_done(handle, timeout);
+    printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
+    return ret;
   }
 
   void
   wait(uint64_t cycle)
   {
+    printf ("************** SAIF (%s: %s: %d) ***************\n", __FILE__, __func__, __LINE__);
     device->wait_graph(handle, cycle);
+    printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
   }
 
   void
@@ -106,7 +119,9 @@ public:
   void
   end(uint64_t cycle)
   {
+    printf ("************** SAIF (%s: %s: %d) ***************\n", __FILE__, __func__, __LINE__);
     device->end_graph(handle, cycle);
+    printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
   }
 
   void
@@ -133,42 +148,52 @@ static std::map<xrtGraphHandle, std::shared_ptr<xrt::graph_impl>> graph_cache;
 static std::shared_ptr<xrt::graph_impl>
 open_graph(xrtDeviceHandle dhdl, const xuid_t xclbin_uuid, const char* graph_name, xrt::graph::access_mode am)
 {
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   auto core_device = xrt_core::device_int::get_core_device(dhdl);
   auto handle = core_device->open_graph(xclbin_uuid, graph_name, am);
   auto ghdl = std::make_shared<xrt::graph_impl>(core_device, handle);
+  printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
   return ghdl;
 }
 
 static std::shared_ptr<xrt::graph_impl>
 open_graph(const xrt::device& device, const xrt::uuid& xclbin_id, const std::string& name, xrt::graph::access_mode am)
 {
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   auto core_device = device.get_handle();
   auto handle = core_device->open_graph(xclbin_id.get(), name.c_str(), am);
   auto ghdl = std::make_shared<xrt::graph_impl>(core_device, handle);
+  printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
   return ghdl;
 }
 
 static std::shared_ptr<xrt::graph_impl>
 get_graph_hdl(xrtGraphHandle graph_handle)
 {
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   auto itr = graph_cache.find(graph_handle);
   if (itr == graph_cache.end())
     throw xrt_core::error(-EINVAL, "No such graph handle");
+  printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
   return (*itr).second;
 }
 
 static void
 close_graph(xrtGraphHandle hdl)
 {
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   if (graph_cache.erase(hdl) == 0)
     throw std::runtime_error("Unexpected internal error");
+  printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
 }
 
 static void
 open_aie_context(xrtDeviceHandle dhdl, xrt::aie::access_mode am)
 {
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   auto device = xrt_core::device_int::get_core_device(dhdl);
   device->open_aie_context(am);
+  printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
 }
 
 static void
@@ -238,7 +263,9 @@ namespace xrt {
 graph::
 graph(const xrt::device& device, const xrt::uuid& xclbin_id, const std::string& name, graph::access_mode am)
   : handle(open_graph(device, xclbin_id, name, am))
-{}
+{
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
+}
 
 void
 graph::
@@ -258,24 +285,30 @@ void
 graph::
 run(uint32_t iterations)
 {
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   handle->run(iterations);
+  printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
 }
 
 void
 graph::
 wait(std::chrono::milliseconds timeout_ms)
 {
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   if (timeout_ms.count() == 0)
     handle->wait(static_cast<uint64_t>(0));
   else
     handle->wait(static_cast<int>(timeout_ms.count()));
+  printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
 }
 
 void
 graph::
 wait(uint64_t cycles)
 {
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   handle->wait(cycles);
+  printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
 }
 
 void
@@ -296,7 +329,9 @@ void
 graph::
 end(uint64_t cycles)
 {
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   handle->end(cycles);
+  printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
 }
 
 void
@@ -322,6 +357,7 @@ read_port(const std::string& port_name, void* value, size_t bytes)
 xrtGraphHandle
 xrtGraphOpen(xrtDeviceHandle dev_handle, const xuid_t xclbin_uuid, const char* graph_name)
 {
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   try {
     auto hdl = open_graph(dev_handle, xclbin_uuid, graph_name, xrt::graph::access_mode::primary);
     graph_cache[hdl.get()] = hdl;
@@ -334,12 +370,14 @@ xrtGraphOpen(xrtDeviceHandle dev_handle, const xuid_t xclbin_uuid, const char* g
   catch (const std::exception& ex) {
     xrt_core::send_exception_message(ex.what());
   }
+  printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
   return XRT_NULL_HANDLE;
 }
 
 xrtGraphHandle
 xrtGraphOpenExclusive(xrtDeviceHandle dev_handle, const xuid_t xclbin_uuid, const char* graph_name)
 {
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   try {
     auto hdl = open_graph(dev_handle, xclbin_uuid, graph_name, xrt::graph::access_mode::exclusive);
     graph_cache[hdl.get()] = hdl;
@@ -352,12 +390,14 @@ xrtGraphOpenExclusive(xrtDeviceHandle dev_handle, const xuid_t xclbin_uuid, cons
   catch (const std::exception& ex) {
     xrt_core::send_exception_message(ex.what());
   }
+  printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
   return XRT_NULL_HANDLE;
 }
 
 xrtGraphHandle
 xrtGraphOpenShared(xrtDeviceHandle dev_handle, const xuid_t xclbin_uuid, const char* graph_name)
 {
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   try {
     auto hdl = open_graph(dev_handle, xclbin_uuid, graph_name, xrt::graph::access_mode::shared);
     graph_cache[hdl.get()] = hdl;
@@ -370,12 +410,14 @@ xrtGraphOpenShared(xrtDeviceHandle dev_handle, const xuid_t xclbin_uuid, const c
   catch (const std::exception& ex) {
     xrt_core::send_exception_message(ex.what());
   }
+  printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
   return XRT_NULL_HANDLE;
 }
 
 void
 xrtGraphClose(xrtGraphHandle graph_hdl)
 {
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   try {
     close_graph(graph_hdl);
   }
@@ -386,6 +428,7 @@ xrtGraphClose(xrtGraphHandle graph_hdl)
   catch (const std::exception& ex) {
     send_exception_message(ex.what());
   }
+  printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
 }
 
 int
@@ -426,9 +469,11 @@ xrtGraphTimeStamp(xrtGraphHandle graph_hdl)
 int
 xrtGraphRun(xrtGraphHandle graph_hdl, int iterations)
 {
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   try {
     auto hdl = get_graph_hdl(graph_hdl);
     hdl->run(iterations);
+    printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
     return 0;
   }
   catch (const xrt_core::error& ex) {
@@ -438,15 +483,20 @@ xrtGraphRun(xrtGraphHandle graph_hdl, int iterations)
   catch (const std::exception& ex) {
     send_exception_message(ex.what());
   }
+  printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
   return -1;
 }
 
 int
 xrtGraphWaitDone(xrtGraphHandle graph_hdl, int timeoutMilliSec)
 {
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   try {
+    int ret;
     auto hdl = get_graph_hdl(graph_hdl);
-    return hdl->wait(timeoutMilliSec);
+    ret = hdl->wait(timeoutMilliSec);
+    printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
+    return ret;
   }
   catch (const xrt_core::error& ex) {
     xrt_core::send_exception_message(ex.what());
@@ -455,15 +505,18 @@ xrtGraphWaitDone(xrtGraphHandle graph_hdl, int timeoutMilliSec)
   catch (const std::exception& ex) {
     send_exception_message(ex.what());
   }
+  printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
   return -1;
 }
 
 int
 xrtGraphWait(xrtGraphHandle graph_hdl, uint64_t cycle)
 {
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   try {
     auto hdl = get_graph_hdl(graph_hdl);
     hdl->wait(cycle);
+    printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
     return 0;
   }
   catch (const xrt_core::error& ex) {
@@ -473,6 +526,7 @@ xrtGraphWait(xrtGraphHandle graph_hdl, uint64_t cycle)
   catch (const std::exception& ex) {
     send_exception_message(ex.what());
   }
+  printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
   return -1;
 }
 
@@ -515,9 +569,11 @@ xrtGraphResume(xrtGraphHandle graph_hdl)
 int
 xrtGraphEnd(xrtGraphHandle graph_hdl, uint64_t cycle)
 {
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   try {
     auto hdl = get_graph_hdl(graph_hdl);
     hdl->end(cycle);
+    printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
     return 0;
   }
   catch (const xrt_core::error& ex) {
@@ -527,6 +583,7 @@ xrtGraphEnd(xrtGraphHandle graph_hdl, uint64_t cycle)
   catch (const std::exception& ex) {
     send_exception_message(ex.what());
   }
+  printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
   return -1;
 }
 
@@ -569,9 +626,11 @@ xrtGraphReadRTP(xrtGraphHandle graph_hdl, const char* port, char* buffer, size_t
 xrtDeviceHandle
 xrtAIEDeviceOpen(unsigned int index)
 {
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   try {
     auto handle = xrtDeviceOpen(index);
     open_aie_context(handle, xrt::aie::access_mode::primary);
+    printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
     return handle;
   }
   catch (const xrt_core::error& ex) {
@@ -581,15 +640,18 @@ xrtAIEDeviceOpen(unsigned int index)
   catch (const std::exception& ex) {
     send_exception_message(ex.what());
   }
+  printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
   return nullptr;
 }
 
 xrtDeviceHandle
 xrtAIEDeviceOpenExclusive(unsigned int index)
 {
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   try {
     auto handle = xrtDeviceOpen(index);
     open_aie_context(handle, xrt::aie::access_mode::exclusive);
+    printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
     return handle;
   }
   catch (const xrt_core::error& ex) {
@@ -599,15 +661,18 @@ xrtAIEDeviceOpenExclusive(unsigned int index)
   catch (const std::exception& ex) {
     send_exception_message(ex.what());
   }
+  printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
   return nullptr;
 }
 
 xrtDeviceHandle
 xrtAIEDeviceOpenShared(unsigned int index)
 {
+  printf ("************** SAIF (%s: %s: %d) >>>> Entering ***************\n", __FILE__, __func__, __LINE__);
   try {
     auto handle = xrtDeviceOpen(index);
     open_aie_context(handle, xrt::aie::access_mode::shared);
+    printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
     return handle;
   }
   catch (const xrt_core::error& ex) {
@@ -617,6 +682,7 @@ xrtAIEDeviceOpenShared(unsigned int index)
   catch (const std::exception& ex) {
     send_exception_message(ex.what());
   }
+  printf ("************** SAIF (%s: %s: %d) <<<< Returning ***************\n", __FILE__, __func__, __LINE__);
   return nullptr;
 }
 
