@@ -556,6 +556,17 @@ struct pci_bars {
         u64 range;
 };
 
+struct xocl_xclbin_cache {
+	struct xocl_xclbin	*xdev_xclbin;
+
+	/*
+	 * To cache user space pass down kernel metadata when load xclbin.
+	 * Maybe we would have a better place, like fdt. Before that, keep this.
+	 */
+	int			ksize;
+	char			*kernels;
+};
+
 #define SERIAL_NUM_LEN	32
 struct xocl_dev_core {
 	struct pci_dev		*pdev;
@@ -605,14 +616,7 @@ struct xocl_dev_core {
 	struct completion	api_comp;
 	int			api_call_cnt;
 
-	struct xocl_xclbin 	*xdev_xclbin;
-
-	/*
-	 * To cache user space pass down kernel metadata when load xclbin.
-	 * Maybe we would have a better place, like fdt. Before that, keep this.
-	 */
-	int			ksize;
-	char			*kernels;
+	struct xocl_xclbin_info *xclbin_cache[MAX_SLOT_SUPPORT];
 	struct drm_xocl_kds	kds_cfg;
 
 	/*
@@ -1435,9 +1439,9 @@ enum {
 	(ICAP_CB(xdev, reset_bitstream) ?				\
 	ICAP_OPS(xdev)->reset_bitstream(ICAP_DEV(xdev)) :		\
 	-ENODEV)
-#define	xocl_icap_download_axlf(xdev, xclbin, force_download)		\
+#define	xocl_icap_download_axlf(xdev, xclbin, force_download, slot_id)		\
 	(ICAP_CB(xdev, download_bitstream_axlf) ?			\
-	ICAP_OPS(xdev)->download_bitstream_axlf(ICAP_DEV(xdev), xclbin, force_download) : \
+	ICAP_OPS(xdev)->download_bitstream_axlf(ICAP_DEV(xdev), xclbin, force_download, slot_id) : \
 	-ENODEV)
 #define	xocl_icap_download_boot_firmware(xdev)				\
 	(ICAP_CB(xdev, download_boot_firmware) ?			\
@@ -1471,9 +1475,9 @@ enum {
 	(ICAP_CB(xdev, ocl_unlock_bitstream) ?				\
 	ICAP_OPS(xdev)->ocl_unlock_bitstream(ICAP_DEV(xdev), uuid) :	\
 	-ENODEV)
-#define	xocl_icap_bitstream_is_locked(xdev)			\
+#define	xocl_icap_bitstream_is_locked(xdev, slot_id)			\
 	(ICAP_CB(xdev, ocl_bitstream_is_locked) ?			\
-	ICAP_OPS(xdev)->ocl_bitstream_is_locked(ICAP_DEV(xdev)) :	\
+	ICAP_OPS(xdev)->ocl_bitstream_is_locked(ICAP_DEV(xdev), slot_id) :	\
 	-ENODEV)
 #define xocl_icap_refresh_addrs(xdev)					\
 	(ICAP_CB(xdev, refresh_addrs) ?					\
@@ -1482,9 +1486,9 @@ enum {
 	(ICAP_CB(xdev, get_data) ?					\
 	ICAP_OPS(xdev)->get_data(ICAP_DEV(xdev), kind) : 		\
 	0)
-#define	xocl_icap_get_xclbin_metadata(xdev, kind, buf)			\
+#define	xocl_icap_get_xclbin_metadata(xdev, kind, buf, slot_id)			\
 	(ICAP_CB(xdev, get_xclbin_metadata) ?				\
-	ICAP_OPS(xdev)->get_xclbin_metadata(ICAP_DEV(xdev), kind, buf) :	\
+	ICAP_OPS(xdev)->get_xclbin_metadata(ICAP_DEV(xdev), kind, buf, slot_id) :	\
 	-ENODEV)
 #define	xocl_icap_put_xclbin_metadata(xdev)			\
 	(ICAP_CB(xdev, put_xclbin_metadata) ?			\
@@ -1499,18 +1503,18 @@ enum {
 	ICAP_OPS(xdev)->clean_bitstream(ICAP_DEV(xdev)) : 	\
 	-ENODEV)
 
-#define XOCL_GET_MEM_TOPOLOGY(xdev, mem_topo)						\
-	(xocl_icap_get_xclbin_metadata(xdev, MEMTOPO_AXLF, (void **)&mem_topo))
-#define XOCL_GET_GROUP_TOPOLOGY(xdev, group_topo)					\
-	(xocl_icap_get_xclbin_metadata(xdev, GROUPTOPO_AXLF, (void **)&group_topo))
-#define XOCL_GET_IP_LAYOUT(xdev, ip_layout)						\
-	(xocl_icap_get_xclbin_metadata(xdev, IPLAYOUT_AXLF, (void **)&ip_layout))
-#define XOCL_GET_CONNECTIVITY(xdev, conn)						\
-	(xocl_icap_get_xclbin_metadata(xdev, CONNECTIVITY_AXLF, (void **)&conn))
-#define XOCL_GET_XCLBIN_ID(xdev, xclbin_id)						\
-	(xocl_icap_get_xclbin_metadata(xdev, XCLBIN_UUID, (void **)&xclbin_id))
-#define XOCL_GET_PS_KERNEL(xdev, ps_kernel)						\
-	(xocl_icap_get_xclbin_metadata(xdev, SOFT_KERNEL, (void **)&ps_kernel))
+#define XOCL_GET_MEM_TOPOLOGY(xdev, mem_topo, slot_id)						\
+	(xocl_icap_get_xclbin_metadata(xdev, MEMTOPO_AXLF, (void **)&mem_topo), slot_id)
+#define XOCL_GET_GROUP_TOPOLOGY(xdev, group_topo, slot_id)					\
+	(xocl_icap_get_xclbin_metadata(xdev, GROUPTOPO_AXLF, (void **)&group_topo), slot_id)
+#define XOCL_GET_IP_LAYOUT(xdev, ip_layout, slot_id)						\
+	(xocl_icap_get_xclbin_metadata(xdev, IPLAYOUT_AXLF, (void **)&ip_layout), slot_id)
+#define XOCL_GET_CONNECTIVITY(xdev, conn, slot_id)						\
+	(xocl_icap_get_xclbin_metadata(xdev, CONNECTIVITY_AXLF, (void **)&conn), slot_id)
+#define XOCL_GET_XCLBIN_ID(xdev, xclbin_id, slot_id)						\
+	(xocl_icap_get_xclbin_metadata(xdev, XCLBIN_UUID, (void **)&xclbin_id), slot_id)
+#define XOCL_GET_PS_KERNEL(xdev, ps_kernel, slot_id)						\
+	(xocl_icap_get_xclbin_metadata(xdev, SOFT_KERNEL, (void **)&ps_kernel), slot_id)
 
 
 #define XOCL_PUT_MEM_TOPOLOGY(xdev)						\

@@ -560,8 +560,11 @@ struct drm_xocl_pread_unmgd {
 
 
 struct drm_xocl_mm_stat {
-	size_t memory_usage;
-	unsigned int bo_count;
+	unsigned int		slot_id;
+	unsigned int		mem_index;
+	size_t			memory_usage;
+	unsigned int		bo_count;
+	struct list_head	link;
 };
 
 /**
