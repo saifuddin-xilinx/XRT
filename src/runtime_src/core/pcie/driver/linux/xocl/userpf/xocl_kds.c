@@ -2054,6 +2054,7 @@ int xocl_kds_update(struct xocl_dev *xdev, struct drm_xocl_kds cfg)
 
 	if (!KDS_SYSFS_SETTING(XDEV(xdev)->kds.cu_intr))
 		XDEV(xdev)->kds.cu_intr = 0;
+
 	ret = kds_cfg_update(&XDEV(xdev)->kds);
 	if (ret)
 		userpf_err(xdev, "KDS configure update failed, ret %d", ret);

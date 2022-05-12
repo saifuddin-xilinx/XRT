@@ -813,7 +813,7 @@ uint32_t xocl_get_shared_ddr(struct xocl_drm *drm_p, struct mem_data *m_data)
 	return 0xffffffff;
 }
 
-int xocl_cleanup_mem_nolock(struct xocl_drm *drm_p)
+int xocl_cleanup_mem_nolock(struct xocl_drm *drm_p, uint32_t slot_id)
 {
 	int err;
 	struct mem_topology *topology = NULL;
@@ -925,28 +925,111 @@ int xocl_set_cma_bank(struct xocl_drm *drm_p, uint64_t base_addr, size_t ddr_ban
 	return xocl_addr_translator_enable_remap(drm_p->xdev, base_addr, ddr_bank_size);
 }
 
-int xocl_cleanup_mem(struct xocl_drm *drm_p)
+int xocl_cleanup_mem(struct xocl_drm *drm_p, uint32_t slot_id)
 {
 	int ret;
 	mutex_lock(&drm_p->mm_lock);
-	ret = xocl_cleanup_mem_nolock(drm_p);
+	ret = xocl_cleanup_mem_nolock(drm_p, slot_id);
 	mutex_unlock(&drm_p->mm_lock);
 	return ret;
 }
 
-int xocl_init_mem(struct xocl_drm *drm_p)
+int xocl_init_mem_manager(struct xocl_drm *drm_p, uint32_t slot_id)
 {
-	size_t length = 0;
+	struct xocl_mem_manager *xocl_mem = NULL;
+	struct mem_topology *topo = NULL;
+	struct mem_data *mem_data = NULL;
+	uint64_t mm_start_addr = 0;
+	uint64_t mm_end_addr = 0;
+	int err = 0;
+	int i = -1;
+
+	/* Check whether the memory manager is already initialized or not */
+	if (drm_p->xocl_mem)
+		return 0; // Memory manager is already initialized
+
+	xocl_mem = vzalloc(sizeof(struct xocl_mem_manager));
+	if (!xocl_mem)
+		return -ENOMEM;
+
+	err = XOCL_GET_MEM_TOPOLOGY(drm_p->xdev, topo, slot_id);
+	if (err) {
+		vfree(xocl_mem);
+		return err;
+	}
+
+	if (topo == NULL) {
+		err = -ENODEV;
+		goto error;
+	}
+
+	mutex_lock(&drm_p->mm_lock);
+	/* Initialize with max and min possible value */
+	mm_start_addr = 0xffffFFFFffffFFFF;
+	mm_end_addr = 0;
+
+	/* Initialize the used banks and their sizes */
+	/* Currently only fixed sizes are supported */
+	for (i = 0; i < topo->m_count; i++) {
+		mem_data = &topo->m_mem_data[i];
+		ddr_bank_size = mem_data->m_size * 1024;
+
+		/* For multislot we should check each BANKs to initialize memory
+		 * manager.
+		 */
+		if (XOCL_IS_STREAM(topo, i))
+			continue;
+
+		if (XOCL_IS_PS_KERNEL_MEM(topo, i))
+			continue;
+
+		if (!is_mem_region_valid(drm_p, mem_data))
+			continue;
+
+		/* Update the start and end address for the memory manager */
+		if (mem_data->m_base_address < mm_start_addr)
+			mm_start_addr = mem_data->m_base_address;
+		if ((mem_data->m_base_address + ddr_bank_size) > mm_end_addr)
+			mm_end_addr = mem_data->m_base_address + ddr_bank_size;
+	}
+
+	XOCL_PUT_MEM_TOPOLOGY(drm_p->xdev, slot_id);
+
+	/* Initialize the memory manager */
+	xocl_mem->mm = vzalloc(sizeof(struct drm_mm));
+	if (!drm_p->mm) {
+		err = -ENOMEM;
+		goto error;
+	}
+
+	drm_mm_init(xocl_mem->mm, mm_start_addr, (mm_end_addr - mm_start_addr));
+	xocl_mem->start_addr = mm_start_addr;
+	xocl_mem->end_addr = mm_end_addr;
+
+	xocl_info(drm_p->ddev->dev, "drm_mm_init called for the available memory range");
+
+	drm_p->xocl_mem = xocl_mem;
+	mutex_unlock(&drm_p->mm_lock);
+
+	return err;
+
+error:
+	XOCL_PUT_MEM_TOPOLOGY(drm_p->xdev, slot_id);
+	vfree(xocl_mem);
+	mutex_unlock(&drm_p->mm_lock);
+
+	return err;
+}
+
+int xocl_init_mem(struct xocl_drm *drm_p, uint32_t slot_id)
+{
 	size_t mm_stat_size = 0;
 	size_t size = 0, wrapper_size = 0;
 	size_t ddr_bank_size;
-	struct mem_topology *topo = NULL;
 	struct mem_topology *group_topo = NULL;
 	struct mem_data *mem_data;
 	uint32_t shared;
 	struct xocl_mm_wrapper *wrapper = NULL;
-	uint64_t mm_start_addr = 0;
-	uint64_t mm_end_addr = 0;
 	uint64_t reserved1 = 0;
 	uint64_t reserved2 = 0;
 	uint64_t reserved_start;
@@ -960,22 +1043,6 @@ int xocl_init_mem(struct xocl_drm *drm_p)
 		reserved2 = 0x1000000;
 	}
 
-	err = XOCL_GET_MEM_TOPOLOGY(drm_p->xdev, topo);
-	if (err)
-		return err;
-
-	if (topo == NULL) {
-		err = -ENODEV;
-		XOCL_PUT_MEM_TOPOLOGY(drm_p->xdev);
-		return err;
-	}
-
-	length = topo->m_count * sizeof(struct mem_data);
-	wrapper_size = sizeof(struct xocl_mm_wrapper);
-	mm_stat_size = sizeof(struct drm_xocl_mm_stat);
-	xocl_info(drm_p->ddev->dev, "Topology count = %d, data_length = %ld",
-		topo->m_count, length);
-
 	mutex_lock(&drm_p->mm_lock);
 
 	err = xocl_p2p_mem_init(drm_p->xdev);
@@ -987,46 +1054,31 @@ int xocl_init_mem(struct xocl_drm *drm_p)
 	err = 0;
 
 	/* Initialize memory stats based on Group topology */
-	err = XOCL_GET_GROUP_TOPOLOGY(drm_p->xdev, group_topo);
+	err = XOCL_GET_GROUP_TOPOLOGY(drm_p->xdev, group_topo, slot_id);
 	if (err) {
-		XOCL_PUT_MEM_TOPOLOGY(drm_p->xdev);
 		mutex_unlock(&drm_p->mm_lock);
 		return err;
 	}
 
 	if (group_topo == NULL) {
 		err = -ENODEV;
-		XOCL_PUT_MEM_TOPOLOGY(drm_p->xdev);
-		XOCL_PUT_GROUP_TOPOLOGY(drm_p->xdev);
+		XOCL_PUT_GROUP_TOPOLOGY(drm_p->xdev, slot_id);
 		mutex_unlock(&drm_p->mm_lock);
 		return err;
-	}
-
-	size = group_topo->m_count * sizeof(void *);
-	drm_p->mm_usage_stat = vzalloc(size);
-	if (!drm_p->mm_usage_stat) {
-		err = -ENOMEM;
-		XOCL_PUT_GROUP_TOPOLOGY(drm_p->xdev);
-		goto done;
-	}
-
-	drm_p->bo_usage_stat = vzalloc(XOCL_BO_USAGE_TOTAL * sizeof(struct drm_xocl_mm_stat));
-	if (!drm_p->bo_usage_stat) {
-		err = -ENOMEM;
-		XOCL_PUT_GROUP_TOPOLOGY(drm_p->xdev);
-		goto done;
 	}
 
 	drm_p->cma_bank_idx = -1;
 	for (i = 0; i < group_topo->m_count; i++) {
 		mem_data = &group_topo->m_mem_data[i];
 		ddr_bank_size = mem_data->m_size * 1024;
-		xocl_info(drm_p->ddev->dev, "  Memory Bank: %s", mem_data->m_tag);
+		xocl_info(drm_p->ddev->dev, "  Memory Bank: %s",
+			  mem_data->m_tag);
 		xocl_info(drm_p->ddev->dev, "  Base Address:0x%llx",
-			mem_data->m_base_address);
+			  mem_data->m_base_address);
 		xocl_info(drm_p->ddev->dev, "  Size:0x%lx", ddr_bank_size);
 		xocl_info(drm_p->ddev->dev, "  Type:%d", mem_data->m_type);
 		xocl_info(drm_p->ddev->dev, "  Used:%d", mem_data->m_used);
+
 		if (convert_mem_tag(mem_data->m_tag) == MEM_TAG_HOST)
 			drm_p->cma_bank_idx = i;
 
@@ -1078,22 +1130,10 @@ int xocl_init_mem(struct xocl_drm *drm_p)
 		if (!is_mem_region_valid(drm_p, mem_data))
 			continue;
 
-		xocl_info(drm_p->ddev->dev, "Allocating Memory Bank: %s", mem_data->m_tag);
+		xocl_info(drm_p->ddev->dev, "Allocating Memory Bank: %s",
+			 mem_data->m_tag);
 		xocl_info(drm_p->ddev->dev, "  base_addr:0x%llx, total size:0x%lx",
-			mem_data->m_base_address, ddr_bank_size);
-
-		/* Update the start and end address for the memory manager */
-		if (mem_data->m_base_address < mm_start_addr)
-			mm_start_addr = mem_data->m_base_address;
-		if ((mem_data->m_base_address + ddr_bank_size) > mm_end_addr)
-			mm_end_addr = mem_data->m_base_address + ddr_bank_size;
-
-		if (XOCL_DSA_IS_MPSOC(drm_p->xdev)) {
-			reserved_end = mem_data->m_base_address + ddr_bank_size;
-			reserved_start = reserved_end - reserved1 - reserved2;
-			xocl_info(drm_p->ddev->dev, "  reserved region:0x%llx - 0x%llx",
-				reserved_start, reserved_end - 1);
-		}
+			 mem_data->m_base_address, ddr_bank_size);
 
 		shared = xocl_get_shared_ddr(drm_p, mem_data);
 		if (shared != 0xffffffff) {
@@ -1116,22 +1156,80 @@ int xocl_init_mem(struct xocl_drm *drm_p)
 #endif
 
 		if (convert_mem_tag(mem_data->m_tag) == MEM_TAG_HOST) {
-			err = xocl_set_cma_bank(drm_p, mem_data->m_base_address, ddr_bank_size);
+			err = xocl_set_cma_bank(drm_p, mem_data->m_base_address,
+						ddr_bank_size);
+
+		mm_usage = vzalloc(sizeof(struct drm_xocl_mm_stat));
+		if (!mm_usage) {
+			err = -ENOMEM;
+			goto done;
+		}
+
+		mm_usage->slot_id = slot_id;
+		mm_usage->mem_index = i;
+
+		if (!drm_p->mm_usage_stat)
+			drm_p->mm_usage_stat = mm_usage; // List Head
+		else
+			list_add_tail(&mm_usage->link,
+				      &drm_p->mm_usage_stat->link)
+
+
+		bo_usage = vzalloc(XOCL_BO_USAGE_TOTAL *
+				   sizeof(struct drm_xocl_mm_stat));
+		if (!bo_usage) {
+			err = -ENOMEM;
+			goto done;
+		}
+
+		bo_usage->slot_id = slot_id;
+		bo_usage->mem_index = i;
+
+		if (!drm_p->bo_usage_stat)
+			drm_p->bo_usage_stat = bo_usage; // List Head
+		else
+			list_add_tail(&bo_usage->link,
+				      &drm_p->bo_usage_stat->link)
+	}
+
+	XOCL_PUT_GROUP_TOPOLOGY(drm_p->xdev);
+	mutex_unlock(&drm_p->mm_lock);
+
+	err = xocl_init_mem_manager(drm_p, slot_id);
+	if (err)
+		goto done;
+
+	mutex_lock(&drm_p->mm_lock);
+	err = XOCL_GET_MEM_TOPOLOGY(drm_p->xdev, topo);
+	if (err)
+		goto done;
+
+	/* Initialize the used banks and their sizes */
+	/* Currently only fixed sizes are supported */
+	for (i = 0; i < topo->m_count; i++) {
+		mem_data = &topo->m_mem_data[i];
+		ddr_bank_size = mem_data->m_size * 1024;
+
+		if (XOCL_IS_P2P_MEM(topo, i)) {
+			if (mem_data->m_used) {
+				xocl_p2p_mem_map(drm_p->xdev,
+				    mem_data->m_base_address,
+				    ddr_bank_size, 0, 0, NULL);
+			} else {
+				xocl_p2p_mem_map(drm_p->xdev, ~0UL,
+				     ddr_bank_size, 0, 0, NULL);
+			}
+		}
+
+		if (IS_HOST_MEM(mem_data->m_tag)) {
+			err = xocl_set_cma_bank(drm_p, mem_data->m_base_address,
+						ddr_bank_size);
 			if (err) {
 				xocl_err(drm_p->ddev->dev, "Run host_mem to setup host memory access, request 0x%lx bytes", ddr_bank_size);
 				goto done;
 			}
 		}
 	}
-
-    drm_p->mm = vzalloc(sizeof(struct drm_mm));
-	if (!drm_p->mm) {
-		err = -ENOMEM;
-		goto done;
-	}
-
-    drm_mm_init(drm_p->mm, mm_start_addr, (mm_end_addr - mm_start_addr));
-    xocl_info(drm_p->ddev->dev, "drm_mm_init called for the available memory range");
 
 done:
 	if (err)

@@ -54,12 +54,18 @@ struct xocl_cma_bank {
 	struct xocl_cma_memory	cma_mem[1];
 };
 
+struct xocl_mem_manager {
+	/* Memory manager */
+	uint64_t		start_addr;
+	uint64_t		end_addr;
+	struct drm_mm           *mm;
+};
+
 struct xocl_drm {
 	xdev_handle_t		xdev;
-	/* memory management */
 	struct drm_device       *ddev;
 	/* Memory manager */
-	struct drm_mm           *mm;
+	struct xocl_mem_manager *xocl_mem;
 	struct mutex            mm_lock;
 	struct drm_xocl_mm_stat **mm_usage_stat;
 	/* Array of bo usage stats */

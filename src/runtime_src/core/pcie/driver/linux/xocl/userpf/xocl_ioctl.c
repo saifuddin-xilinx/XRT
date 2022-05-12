@@ -303,13 +303,15 @@ static int xocl_preserve_memcmp(struct mem_topology *new_topo, struct mem_topolo
 
 }
 
-static int xocl_preserve_mem(struct xocl_drm *drm_p, struct mem_topology *new_topology, size_t size)
+static int xocl_preserve_mem(struct xocl_drm *drm_p,
+			     struct mem_topology *new_topology,
+			     size_t size, int slot_id)
 {
 	int ret = 0;
 	struct mem_topology *topology = NULL;
 	struct xocl_dev *xdev = drm_p->xdev;
 
-	ret = XOCL_GET_MEM_TOPOLOGY(xdev, topology);
+	ret = XOCL_GET_MEM_TOPOLOGY(xdev, topology, slot_id);
 	if (ret)
 		return 0;
 
@@ -326,7 +328,7 @@ static int xocl_preserve_mem(struct xocl_drm *drm_p, struct mem_topology *new_to
 			userpf_info(xdev, "not preserving mem_topology.");
 		}
 	}
-	XOCL_PUT_MEM_TOPOLOGY(xdev);
+	XOCL_PUT_MEM_TOPOLOGY(xdev, slot_id);
 
 	return ret;
 }
@@ -343,6 +345,26 @@ static bool xocl_xclbin_in_use(struct xocl_dev *xdev)
 }
 
 static int
+check_resolver(struct xocl_dev *xdev, struct axlf *axlf, uint32_t flags,
+	       bool *force_download)
+{
+	/* SAIF TODO */
+	//
+	if (xclbin_downloaded(xdev, &axlf->m_header.uuid)) {
+		if ((flags & XOCL_AXLF_FORCE_PROGRAM)) {
+			// We come here if user sets force_xclbin_program
+			// option "true" in xrt.ini under [Runtime] section
+			DRM_WARN("%s Force xclbin download", __func__);
+			*force_download = true;
+		} else {
+			return -EINVAL;
+		}
+	}
+
+	return 0;
+}
+
+static int
 xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr)
 {
 	long err = 0;
@@ -356,6 +378,7 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr)
 	void *ulp_blob;
 	void *kernels;
 	int rc;
+	int slot_id = 0;
 	bool force_download = false;
 
 	if (!xocl_is_unified(xdev)) {
@@ -379,17 +402,11 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr)
 		goto done;
 	}
 
-	//
-	if (xclbin_downloaded(xdev, &bin_obj.m_header.uuid)) {
-		if ((axlf_ptr->flags & XOCL_AXLF_FORCE_PROGRAM)) {
-			// We come here if user sets force_xclbin_program
-			// option "true" in xrt.ini under [Runtime] section
-			DRM_WARN("%s Force xclbin download", __func__);
-			force_download = true;
-		} else {
-			goto done;
-		}
-	}
+	slot_id = check_resolver(xdev, &bin_obj, axlf_ptr->flags,
+				 &force_download);
+
+	if (slot_id < 0)
+		goto done;
 
 	/*
 	 * 1. We locked &xdev->dev_lock so no new contexts can be opened
@@ -397,7 +414,7 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr)
 	 * 2. A opened context would lock bitstream and hold it. Directly
 	 *    ask icap if bitstream is locked
 	 */
-	if (xocl_icap_bitstream_is_locked(xdev)) {
+	if (xocl_icap_bitstream_is_locked(xdev, slot_id)) {
 		err = -EBUSY;
 		goto done;
 	}
@@ -478,24 +495,27 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr)
 		goto done;
 	}
 
-	preserve_mem = xocl_preserve_mem(drm_p, new_topology, size);
+	preserve_mem = xocl_preserve_mem(drm_p, new_topology, size, slot_id);
 
+	/* SAIF TODO : I believe we should not reset KDS */
+#if 0
 	/* To support fast adapter kind of CU, KDS would create a bo to
 	 * reserve plram. Needs to release it before cleanup mem.
 	 */
 	xocl_kds_reset(xdev, &uuid_null);
+#endif
 
 	/* Switching the xclbin, make sure none of the buffers are used. */
 	if (!preserve_mem) {
-		err = xocl_cleanup_mem(drm_p);
+		err = xocl_cleanup_mem(drm_p, slot_id);
 		if (err)
 			goto done;
 	}
 
-	if (XDEV(xdev)->kernels != NULL) {
-		vfree(XDEV(xdev)->kernels);
-		XDEV(xdev)->kernels = NULL;
-		XDEV(xdev)->ksize = 0;
+	if (XDEV(xdev)->xclbin_cache[slot_id]->kernels != NULL) {
+		vfree(XDEV(xdev)->xclbin_cache[slot_id]->kernels);
+		XDEV(xdev)->xclbin_cache[slot_id]->kernels = NULL;
+		XDEV(xdev)->xclbin_cache[slot_id]->ksize = 0;
 	}
 
 	/* There is a corner case.
@@ -516,20 +536,20 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr)
 			err = -EFAULT;
 			goto done;
 		}
-		XDEV(xdev)->ksize = axlf_ptr->ksize;
-		XDEV(xdev)->kernels = kernels;
+		XDEV(xdev)->xclbin_cache[slot_id]->ksize = axlf_ptr->ksize;
+		XDEV(xdev)->xclbin_cache[slot_id]->kernels = kernels;
 	}
 
 	memcpy(&XDEV(xdev)->kds_cfg, &axlf_ptr->kds_cfg, sizeof(axlf_ptr->kds_cfg));
 
-	err = xocl_icap_download_axlf(xdev, axlf, force_download);
+	err = xocl_icap_download_axlf(xdev, axlf, force_download, slot_id);
 	/*
 	 * Don't just bail out here, always recreate drm mem
 	 * since we have cleaned it up before download.
 	 */
 
 	if (!preserve_mem) {
-		rc = xocl_init_mem(drm_p);
+		rc = xocl_init_mem(drm_p, slot_id);
 		if (err == 0)
 			err = rc;
 	}
