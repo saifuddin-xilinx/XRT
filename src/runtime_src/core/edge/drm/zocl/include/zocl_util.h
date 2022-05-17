@@ -102,6 +102,7 @@ struct aie_metadata {
 
 struct drm_zocl_slot {
 	u32			 slot_idx;
+	u32			 pr_idx;
 	struct mem_topology	*topology;
 	struct ip_layout	*ip;
 	struct debug_ip_layout	*debug_ip;
@@ -109,6 +110,8 @@ struct drm_zocl_slot {
 	struct axlf             *axlf;
 	size_t                   axlf_size;
 	struct aie_metadata	 aie_data;
+
+	struct soft_krnl	*soft_kernel;
 
 	u64			 pr_isolation_addr;
 	u16			 pr_isolation_freeze;
@@ -162,7 +165,6 @@ struct drm_zocl_dev {
 	 */
 	rwlock_t		attr_rwlock;
 
-	struct soft_krnl	*soft_kernel;
 	struct aie_info		*aie_information;
 	struct dma_chan		*zdev_dma_chan;
 	struct mailbox		*zdev_mailbox;
