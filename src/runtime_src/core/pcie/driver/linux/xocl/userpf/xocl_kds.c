@@ -2032,6 +2032,7 @@ int xocl_kds_update(struct xocl_dev *xdev, struct drm_xocl_kds cfg)
 
 	xocl_kds_fa_clear(xdev);
 
+	/* SAIF TODO : How to handle first adapter */
 	ret = xocl_detect_fa_cmdmem(xdev);
 	if (ret) {
 		userpf_info(xdev, "Detect FA cmdmem failed, ret %d", ret);

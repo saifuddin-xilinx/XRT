@@ -683,7 +683,7 @@ static void vmr_cq_result_copy(struct xocl_xgq_vmr *xgq, struct xocl_xgq_vmr_cmd
  * Utilize shared memory between host and device to transfer data.
  */
 static ssize_t xgq_transfer_data(struct xocl_xgq_vmr *xgq, const void *buf,
-	u64 len, enum xgq_cmd_opcode opcode, u32 timer)
+	u64 len, uint32_t slot_id, enum xgq_cmd_opcode opcode, u32 timer)
 {
 	struct xocl_xgq_vmr_cmd *cmd = NULL;
 	struct xgq_cmd_data_payload *payload = NULL;
@@ -731,6 +731,7 @@ static ssize_t xgq_transfer_data(struct xocl_xgq_vmr *xgq, const void *buf,
 	memcpy_to_device(xgq, address, buf, len);
 	payload->address = address;
 	payload->size = len;
+	payload->rsvd1 = slot_id;
 	payload->addr_type = XGQ_CMD_ADD_TYPE_AP_OFFSET;
 	payload->flash_type = get_flash_type(xgq);
 
@@ -785,14 +786,14 @@ acquire_failed:
 }
 
 static int xgq_load_xclbin(struct platform_device *pdev,
-	const void *u_xclbin)
+	const void *u_xclbin, uint32_t slot_id)
 {
 	struct xocl_xgq_vmr *xgq = platform_get_drvdata(pdev);
 	struct axlf *xclbin = (struct axlf *)u_xclbin;
 	u64 xclbin_len = xclbin->m_header.m_length;
 	int ret = 0;
-	
-	ret = xgq_transfer_data(xgq, u_xclbin, xclbin_len,
+
+	ret = xgq_transfer_data(xgq, u_xclbin, xclbin_len, slot_id,
 		XGQ_CMD_OP_LOAD_XCLBIN, XOCL_XGQ_DOWNLOAD_TIME);
 
 	return ret == xclbin_len ? 0 : -EIO;

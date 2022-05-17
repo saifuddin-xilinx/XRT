@@ -899,6 +899,8 @@ void xclmgmt_mailbox_srv(void *arg, void *data, size_t len,
 		void *buf = NULL;
 		struct axlf *xclbin = NULL;
 		uint64_t xclbin_len = 0;
+		uint32_t slot_id = (uint32_t)req->flags;
+
 		struct xcl_mailbox_bitstream_kaddr *mb_kaddr =
 			(struct xcl_mailbox_bitstream_kaddr *)req->data;
 		u64 ch_state = 0;
@@ -925,7 +927,7 @@ void xclmgmt_mailbox_srv(void *arg, void *data, size_t len,
 		} else {
 			memcpy(buf, xclbin, xclbin_len);
 
-			ret = xocl_xclbin_download(lro, buf);
+			ret = xocl_xclbin_download(lro, buf, slot_id);
 
 			vfree(buf);
 		}

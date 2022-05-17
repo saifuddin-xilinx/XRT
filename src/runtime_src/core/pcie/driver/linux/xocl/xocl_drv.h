@@ -238,7 +238,8 @@ static inline void xocl_memcpy_toio(void *iomem, void *buf, u32 size)
 		snprintf(((struct xocl_dev_core *)xdev)->ebuf, XOCL_EBUF_LEN,	\
 		fmt, ##args)
 #define MAX_M_COUNT      	XOCL_SUBDEV_MAX_INST
-#define XOCL_MAX_FDT_LEN		1024 * 512
+#define XOCL_MAX_FDT_LEN	1024 * 512
+#define XOCL_MAX_SLOT_SUPPORT	128
 
 #define	XDEV2DEV(xdev)		(&XDEV(xdev)->pdev->dev)
 
@@ -617,7 +618,7 @@ struct xocl_dev_core {
 	int			api_call_cnt;
 
 	struct xocl_xclbin_info *xclbin_cache[MAX_SLOT_SUPPORT];
-	struct drm_xocl_kds	kds_cfg;
+	struct drm_xocl_kds	kds_cfg[MAX_SLOT_SUPPORT];
 
 	/*
 	 * Store information about pci bar mappings of CPM.
@@ -1498,9 +1499,9 @@ enum {
 	(ICAP_CB(xdev, mig_calibration) ?			\
 	ICAP_OPS(xdev)->mig_calibration(ICAP_DEV(xdev)) : 	\
 	-ENODEV)
-#define	xocl_icap_clean_bitstream(xdev)				\
+#define	xocl_icap_clean_bitstream(xdev, slot_id)				\
 	(ICAP_CB(xdev, clean_bitstream) ?			\
-	ICAP_OPS(xdev)->clean_bitstream(ICAP_DEV(xdev)) : 	\
+	ICAP_OPS(xdev)->clean_bitstream(ICAP_DEV(xdev), slot_id) : 	\
 	-ENODEV)
 
 #define XOCL_GET_MEM_TOPOLOGY(xdev, mem_topo, slot_id)						\
@@ -2156,9 +2157,9 @@ struct xocl_xgq_vmr_funcs {
 	(struct xocl_xgq_vmr_funcs *)SUBDEV(xdev, XOCL_SUBDEV_XGQ_VMR)->ops : NULL)
 #define	XGQ_CB(xdev, cb)					\
 	(XGQ_DEV(xdev) && XGQ_OPS(xdev) && XGQ_OPS(xdev)->cb)
-#define	xocl_xgq_download_axlf(xdev, xclbin)			\
+#define	xocl_xgq_download_axlf(xdev, xclbin, slot_id)			\
 	(XGQ_CB(xdev, xgq_load_xclbin) ?			\
-	XGQ_OPS(xdev)->xgq_load_xclbin(XGQ_DEV(xdev), xclbin) : -ENODEV)
+	XGQ_OPS(xdev)->xgq_load_xclbin(XGQ_DEV(xdev), xclbin, slot_id) : -ENODEV)
 #define	xocl_xgq_check_firewall(xdev)				\
 	(XGQ_CB(xdev, xgq_check_firewall) ?			\
 	XGQ_OPS(xdev)->xgq_check_firewall(XGQ_DEV(xdev)) : 0)

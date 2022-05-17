@@ -319,7 +319,8 @@ static int xocl_preserve_mem(struct xocl_drm *drm_p,
 	 * Compare MEM_TOPOLOGY previous vs new.
 	 * Ignore this and keep disable preserve_mem if not for aws.
 	 */
-	if (xocl_icap_get_data(xdev, DATA_RETAIN) && (topology != NULL) && drm_p->mm) {
+	if (xocl_icap_get_data(xdev, DATA_RETAIN) && (topology != NULL) &&
+	    drm_p->mm) {
 		if ((size == sizeof_sect(topology, m_mem_data)) &&
 		    !xocl_preserve_memcmp(new_topology, topology, size)) {
 			userpf_info(xdev, "preserving mem_topology.");
@@ -378,7 +379,7 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr)
 	void *ulp_blob;
 	void *kernels;
 	int rc;
-	int slot_id = 0;
+	uint32_t slot_id = 0;
 	bool force_download = false;
 
 	if (!xocl_is_unified(xdev)) {
@@ -402,11 +403,15 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr)
 		goto done;
 	}
 
-	slot_id = check_resolver(xdev, &bin_obj, axlf_ptr->flags,
+	rc = check_resolver(xdev, &bin_obj, axlf_ptr->flags,
 				 &force_download);
 
-	if (slot_id < 0)
+	if (rc < 0 || rc >= XOCL_MAX_SLOT_SUPPORT) {
+		err = -EINVAL;
 		goto done;
+	}
+
+	slot_id = rc;
 
 	/*
 	 * 1. We locked &xdev->dev_lock so no new contexts can be opened
@@ -418,6 +423,7 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr)
 		err = -EBUSY;
 		goto done;
 	}
+
 	/* All contexts are closed. No outstanding commands */
 
 	/* Really need to download, sanity check xclbin, first. */
@@ -495,22 +501,26 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr)
 		goto done;
 	}
 
+#if 0
+	/* SAIF TODO : I believe we should not reset KDS */
 	preserve_mem = xocl_preserve_mem(drm_p, new_topology, size, slot_id);
 
 	/* SAIF TODO : I believe we should not reset KDS */
-#if 0
 	/* To support fast adapter kind of CU, KDS would create a bo to
 	 * reserve plram. Needs to release it before cleanup mem.
 	 */
 	xocl_kds_reset(xdev, &uuid_null);
-#endif
 
+	/* SAIF TODO : I believe we should not reset KDS */
 	/* Switching the xclbin, make sure none of the buffers are used. */
 	if (!preserve_mem) {
 		err = xocl_cleanup_mem(drm_p, slot_id);
 		if (err)
 			goto done;
 	}
+	/* SAIF TODO : IF Memory topology is not matching then we should error
+	 * it out. As this is not a valid case for multi slot environemnt */
+#endif
 
 	if (XDEV(xdev)->xclbin_cache[slot_id]->kernels != NULL) {
 		vfree(XDEV(xdev)->xclbin_cache[slot_id]->kernels);
@@ -540,7 +550,8 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr)
 		XDEV(xdev)->xclbin_cache[slot_id]->kernels = kernels;
 	}
 
-	memcpy(&XDEV(xdev)->kds_cfg, &axlf_ptr->kds_cfg, sizeof(axlf_ptr->kds_cfg));
+	memcpy(&XDEV(xdev)->kds_cfg[slot_id], &axlf_ptr->kds_cfg,
+	       sizeof(axlf_ptr->kds_cfg));
 
 	err = xocl_icap_download_axlf(xdev, axlf, force_download, slot_id);
 	/*
@@ -548,23 +559,29 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr)
 	 * since we have cleaned it up before download.
 	 */
 
-	if (!preserve_mem) {
+#if 0
+	if (!preserve_mem)
+#endif
+	{
 		rc = xocl_init_mem(drm_p, slot_id);
 		if (err == 0)
 			err = rc;
 	}
 
+	/* SAIF TODO : What to do this ? */
+#if 0
 	/*
 	 * This is a workaround for u280 only
 	 */
 	if (!err &&  size >=0)
 		xocl_p2p_refresh_rbar(xdev);
+#endif
 
 	/* The finial step is to update KDS configuration */
 	if (!err) {
 		err = xocl_kds_update(xdev, axlf_ptr->kds_cfg);
 		if (err) {
-			xocl_icap_clean_bitstream(xdev);
+			xocl_icap_clean_bitstream(xdev, slot_id);
 		}
 	}
 
