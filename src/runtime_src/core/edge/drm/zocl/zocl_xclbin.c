@@ -154,11 +154,13 @@ zocl_load_bitstream(struct drm_zocl_dev *zdev, char *buffer, int length,
 }
 
 static int
-zocl_load_pskernel(struct drm_zocl_dev *zdev, struct axlf *axlf)
+zocl_load_pskernel(struct drm_zocl_dev *zdev, struct axlf *axlf,
+		   uint32_t slot_id)
 {
 	struct axlf_section_header *header = NULL;
 	char *xclbin = (char *)axlf;
-	struct soft_krnl *sk = zdev->soft_kernel;
+	//struct soft_krnl *sk = zdev->soft_kernel;
+	struct soft_krnl *sk = zdev->pr_slot[slot_id]->soft_kernel
 	int count, sec_idx = 0, scu_idx = 0;
 	int i, ret;
 
@@ -186,10 +188,10 @@ zocl_load_pskernel(struct drm_zocl_dev *zdev, struct axlf *axlf)
 		return 0;
 	}
 
-
 	sk->sk_nimg = count;
 	sk->sk_img = kzalloc(sizeof(struct scu_image) * count, GFP_KERNEL);
-	header = xrt_xclbin_get_section_hdr_next(axlf, EMBEDDED_METADATA, header);
+	header = xrt_xclbin_get_section_hdr_next(axlf, EMBEDDED_METADATA,
+						 header);
 	if(header) {
 		DRM_INFO("Found EMBEDDED_METADATA section\n");
 	} else {
@@ -958,7 +960,7 @@ zocl_xclbin_load_pskernel(struct drm_zocl_dev *zdev, void *data,
 			DRM_ERROR("%s cannot cache xclbin",__func__);
 			goto out;
 		}
-		ret = zocl_load_pskernel(zdev, slot->axlf);
+		ret = zocl_load_pskernel(zdev, slot->axlf, slot_id);
 		if (ret)
 			goto out;
 	}
