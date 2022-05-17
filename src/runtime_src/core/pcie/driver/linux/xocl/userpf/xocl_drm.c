@@ -813,6 +813,7 @@ uint32_t xocl_get_shared_ddr(struct xocl_drm *drm_p, struct mem_data *m_data)
 	return 0xffffffff;
 }
 
+/* SAIF TODO */
 int xocl_cleanup_mem_nolock(struct xocl_drm *drm_p, uint32_t slot_id)
 {
 	int err;
@@ -827,10 +828,6 @@ int xocl_cleanup_mem_nolock(struct xocl_drm *drm_p, uint32_t slot_id)
 
 	BUG_ON(!mutex_is_locked(&drm_p->mm_lock));
 
-	if (drm_p->bo_usage_stat) {
-		vfree(drm_p->bo_usage_stat);
-		drm_p->bo_usage_stat = NULL;
-	}
 	err = xocl_check_topology(drm_p);
 	if (err)
 		return err;
@@ -887,6 +884,11 @@ int xocl_cleanup_mem_nolock(struct xocl_drm *drm_p, uint32_t slot_id)
 		}
 		vfree(drm_p->mm_usage_stat);
 		drm_p->mm_usage_stat = NULL;
+
+		if (drm_p->bo_usage_stat) {
+			vfree(drm_p->bo_usage_stat);
+			drm_p->bo_usage_stat = NULL;
+		}
 	}
 	XOCL_PUT_GROUP_TOPOLOGY(drm_p->xdev);
 done:
@@ -943,6 +945,14 @@ int xocl_init_mem_manager(struct xocl_drm *drm_p, uint32_t slot_id)
 	uint64_t mm_end_addr = 0;
 	int err = 0;
 	int i = -1;
+
+	err = xocl_p2p_mem_init(drm_p->xdev);
+	if (err && err != -ENODEV) {
+		xocl_err(drm_p->ddev->dev,
+			"init p2p mem failed, err %d", err);
+		goto done;
+	}
+	err = 0;
 
 	/* Check whether the memory manager is already initialized or not */
 	if (drm_p->xocl_mem)
@@ -1044,14 +1054,6 @@ int xocl_init_mem(struct xocl_drm *drm_p, uint32_t slot_id)
 	}
 
 	mutex_lock(&drm_p->mm_lock);
-
-	err = xocl_p2p_mem_init(drm_p->xdev);
-	if (err && err != -ENODEV) {
-		xocl_err(drm_p->ddev->dev,
-			"init p2p mem failed, err %d", err);
-		goto done;
-	}
-	err = 0;
 
 	/* Initialize memory stats based on Group topology */
 	err = XOCL_GET_GROUP_TOPOLOGY(drm_p->xdev, group_topo, slot_id);
@@ -1233,8 +1235,9 @@ int xocl_init_mem(struct xocl_drm *drm_p, uint32_t slot_id)
 
 done:
 	if (err)
-		xocl_cleanup_mem_nolock(drm_p);
-	XOCL_PUT_MEM_TOPOLOGY(drm_p->xdev);
+		xocl_cleanup_mem_nolock(drm_p, slot_id);
+
+	XOCL_PUT_MEM_TOPOLOGY(drm_p->xdev, slot_id);
 	mutex_unlock(&drm_p->mm_lock);
 	xocl_info(drm_p->ddev->dev, "ret %d", err);
 	return err;

@@ -1652,7 +1652,7 @@ int xocl_fdt_check_uuids(xdev_handle_t xdev_hdl, const void *blob,
 		offset = fdt_path_offset(blob, INTERFACES_PATH);
 		if (offset < 0) {
 			xocl_xdev_err(xdev_hdl, "Invalid offset %d",
-			       	offset);
+				offset);
 			return -EINVAL;
 		}
 

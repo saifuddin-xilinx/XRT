@@ -125,6 +125,8 @@ static void zchan_cmd_load_xclbin(struct zocl_rpu_channel *chan, struct xgq_cmd_
 	struct xgq_cmd_cq *cq = (struct xgq_cmd_cq *)resp;
 	u32 address_offset = sq->xclbin_payload.address;
 	u32 size = sq->xclbin_payload.size;
+	// This reserved filed is using for slot id information
+	u32 slot_id = sq->xclbin_payload.rsvd1;
 	u32 remain_size = sq->xclbin_payload.remain_size;
 	struct zocl_rpu_data_entry *entry = NULL;
 	void __iomem *src = chan->mem_base + address_offset;
@@ -189,7 +191,8 @@ static void zchan_cmd_load_xclbin(struct zocl_rpu_channel *chan, struct xgq_cmd_
 			   total_size, list_empty(&chan->data_list));
 		INIT_LIST_HEAD(&chan->data_list);
 
-		ret = zocl_xclbin_load_pskernel(zocl_get_zdev(),total_data);
+		ret = zocl_xclbin_load_pskernel(zocl_get_zdev(), total_data,
+						slot_id);
 		if (ret)
 			zchan_err(chan, "failed to cache xclbin: %d", ret);
 

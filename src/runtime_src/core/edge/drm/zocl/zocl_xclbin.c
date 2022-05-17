@@ -891,7 +891,8 @@ out:
  * @return      0 on success, Error code on failure.
  */
 int
-zocl_xclbin_load_pskernel(struct drm_zocl_dev *zdev, void *data)
+zocl_xclbin_load_pskernel(struct drm_zocl_dev *zdev, void *data,
+			  uint32_t slot_id)
 {
         struct axlf *axlf = (struct axlf *)data;
         struct axlf *axlf_head = axlf;
@@ -909,7 +910,7 @@ zocl_xclbin_load_pskernel(struct drm_zocl_dev *zdev, void *data)
         }
 
 	// Currently only 1 slot - TODO: Support multi-slot in the future
-	slot = zdev->pr_slot[0];
+	slot = zdev->pr_slot[slot_id];
 
         mutex_lock(&slot->slot_xclbin_lock);
 	/* Check unique ID */
@@ -973,6 +974,7 @@ out:
 		DRM_INFO("%s %pUb ret: %d", __func__, zocl_xclbin_get_uuid(slot), ret);
 	else
 		DRM_INFO("%s ret: %d", __func__, ret);
+
 	mutex_unlock(&slot->slot_xclbin_lock);
 	return ret;
 }
