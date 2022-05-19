@@ -558,7 +558,10 @@ struct pci_bars {
 };
 
 struct xocl_xclbin_cache {
+	uint32_t		slot_idx;
+	int32_t			pr_idx;
 	struct xocl_xclbin	*xdev_xclbin;
+	void                    *ulp_blob;
 
 	/*
 	 * To cache user space pass down kernel metadata when load xclbin.
@@ -566,6 +569,7 @@ struct xocl_xclbin_cache {
 	 */
 	int			ksize;
 	char			*kernels;
+	struct drm_xocl_kds	kds_cfg;
 };
 
 #define SERIAL_NUM_LEN	32
@@ -617,8 +621,7 @@ struct xocl_dev_core {
 	struct completion	api_comp;
 	int			api_call_cnt;
 
-	struct xocl_xclbin_info *xclbin_cache[MAX_SLOT_SUPPORT];
-	struct drm_xocl_kds	kds_cfg[MAX_SLOT_SUPPORT];
+	struct xocl_xclbin_cache *xclbin_cache[MAX_SLOT_SUPPORT];
 
 	/*
 	 * Store information about pci bar mappings of CPM.

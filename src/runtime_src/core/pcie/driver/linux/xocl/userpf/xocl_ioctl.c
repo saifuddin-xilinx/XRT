@@ -351,6 +351,9 @@ check_resolver(struct xocl_dev *xdev, struct axlf *axlf, uint32_t flags,
 {
 	/* SAIF TODO */
 	//
+	struct xocl_xclbin_cache *xclbin_cache = NULL;
+	int pr_idx = 0;
+	int slot_id = 0;
 	if (xclbin_downloaded(xdev, &axlf->m_header.uuid)) {
 		if ((flags & XOCL_AXLF_FORCE_PROGRAM)) {
 			// We come here if user sets force_xclbin_program
@@ -362,7 +365,24 @@ check_resolver(struct xocl_dev *xdev, struct axlf *axlf, uint32_t flags,
 		}
 	}
 
+	xclbin_cache = vmalloc(sizeof(struct xocl_xclbin_cache));
+	if (!xclbin_cache) {
+		userpf_err(xdev, "Unable to alloc mem for xclbin chache\n");
+		return -ENOMEM;
+	}
+
+	xclbin_cache->slot_idx = slot_id;
+	xclbin_cache->pr_idx = pr_idx;
+
+	XDEV(xdev)->xclbin_cache[slot_id] = xclbin_cache;
+
 	return 0;
+}
+
+bool
+check_build_in_ps_kernel(struct xocl_dev *xdev, uint32_t slot_id)
+{
+	return false;
 }
 
 static int
@@ -373,9 +393,11 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr)
 	struct axlf bin_obj;
 	size_t size = 0;
 	int preserve_mem = 0;
+	bool buildin_ps_only = 0;
 	struct mem_topology *new_topology = NULL;
 	struct xocl_dev *xdev = drm_p->xdev;
 	const struct axlf_section_header * dtbHeader = NULL;
+	struct xocl_xclbin_cache *xclbin_cache = NULL;
 	void *ulp_blob;
 	void *kernels;
 	int rc;
@@ -412,7 +434,8 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr)
 	}
 
 	slot_id = rc;
-
+	xclbin_cache = XDEV(xdev)->xclbin_cache[slot_id];
+	buildin_ps_only = check_build_in_ps_kernel(xdev, slot_id);
 	/*
 	 * 1. We locked &xdev->dev_lock so no new contexts can be opened
 	 *    and no contexts can be closed
@@ -464,15 +487,15 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr)
 			goto done;
 		}
 
-		if (xdev->ulp_blob)
-			vfree(xdev->ulp_blob);
+		if (xclbin_cache->ulp_blob)
+			vfree(xclbin_cache->ulp_blob);
 
-		xdev->ulp_blob = vmalloc(fdt_totalsize(ulp_blob));
-		if (!xdev->ulp_blob) {
+		xclbin_cache->ulp_blob = vmalloc(fdt_totalsize(ulp_blob));
+		if (!xclbin_cache->ulp_blob) {
 			err = -ENOMEM;
 			goto done;
 		}
-		memcpy(xdev->ulp_blob, ulp_blob, fdt_totalsize(ulp_blob));
+		memcpy(xclbin_cache->ulp_blob, ulp_blob, fdt_totalsize(ulp_blob));
 
 		/*
 		 * don't check uuid if the xclbin is a lite one
@@ -482,7 +505,7 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr)
 			xocl_xdev_info(xdev, "check interface uuid");
 			err = xocl_fdt_check_uuids(xdev,
 				(const void *)XDEV(xdev)->fdt_blob,
-				(const void *)((char*)xdev->ulp_blob));
+				(const void *)((char*)xclbin_cache->ulp_blob));
 			if (err) {
 				userpf_err(xdev, "interface uuids do not match");
 				err = -EINVAL;
@@ -501,8 +524,10 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr)
 		goto done;
 	}
 
+        /* SAIF TODO : For multi slot case we should not cleanup memory for
+         * xclbin load case. This can be done only when driver load/unload case
+         */
 #if 0
-	/* SAIF TODO : I believe we should not reset KDS */
 	preserve_mem = xocl_preserve_mem(drm_p, new_topology, size, slot_id);
 
 	/* SAIF TODO : I believe we should not reset KDS */
@@ -511,7 +536,6 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr)
 	 */
 	xocl_kds_reset(xdev, &uuid_null);
 
-	/* SAIF TODO : I believe we should not reset KDS */
 	/* Switching the xclbin, make sure none of the buffers are used. */
 	if (!preserve_mem) {
 		err = xocl_cleanup_mem(drm_p, slot_id);
@@ -522,10 +546,10 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr)
 	 * it out. As this is not a valid case for multi slot environemnt */
 #endif
 
-	if (XDEV(xdev)->xclbin_cache[slot_id]->kernels != NULL) {
-		vfree(XDEV(xdev)->xclbin_cache[slot_id]->kernels);
-		XDEV(xdev)->xclbin_cache[slot_id]->kernels = NULL;
-		XDEV(xdev)->xclbin_cache[slot_id]->ksize = 0;
+	if (xclbin_cache->kernels != NULL) {
+		vfree(xclbin_cache->kernels);
+		xclbin_cache->kernels = NULL;
+		xclbin_cache->ksize = 0;
 	}
 
 	/* There is a corner case.
@@ -546,39 +570,42 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr)
 			err = -EFAULT;
 			goto done;
 		}
-		XDEV(xdev)->xclbin_cache[slot_id]->ksize = axlf_ptr->ksize;
-		XDEV(xdev)->xclbin_cache[slot_id]->kernels = kernels;
+		xclbin_cache->ksize = axlf_ptr->ksize;
+		xclbin_cache->kernels = kernels;
 	}
 
-	memcpy(&XDEV(xdev)->kds_cfg[slot_id], &axlf_ptr->kds_cfg,
+	memcpy(&xclbin_cache->kds_cfg, &axlf_ptr->kds_cfg,
 	       sizeof(axlf_ptr->kds_cfg));
 
 	err = xocl_icap_download_axlf(xdev, axlf, force_download, slot_id);
-	/*
-	 * Don't just bail out here, always recreate drm mem
-	 * since we have cleaned it up before download.
-	 */
+	if (err)
+		goto done;
 
-#if 0
-	if (!preserve_mem)
-#endif
+	if (!buildin_ps_only)
 	{
-		rc = xocl_init_mem(drm_p, slot_id);
-		if (err == 0)
-			err = rc;
+		err = xocl_init_mem(drm_p, slot_id);
+		if (err) {
+			xocl_icap_clean_bitstream(xdev, slot_id);
+			goto done;
+		}
 	}
 
-	/* SAIF TODO : What to do this ? */
-#if 0
 	/*
 	 * This is a workaround for u280 only
 	 */
-	if (!err &&  size >=0)
+	if (!buildin_ps_only &&  size >=0)
 		xocl_p2p_refresh_rbar(xdev);
-#endif
 
 	/* The finial step is to update KDS configuration */
 	if (!err) {
+		if (!buildin_ps_only) {
+			err = xocl_kds_fa_init(xdev);
+			if (err) {
+				xocl_icap_clean_bitstream(xdev, slot_id);
+				goto done;
+			}
+		}
+
 		err = xocl_kds_update(xdev, axlf_ptr->kds_cfg);
 		if (err) {
 			xocl_icap_clean_bitstream(xdev, slot_id);

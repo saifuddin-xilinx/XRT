@@ -2023,21 +2023,28 @@ out:
 	return ret;
 }
 
+int xocl_kds_fa_init(struct xocl_dev *xdev)
+{
+	int ret = 0;
+
+	xocl_kds_fa_clear(xdev);
+
+	ret = xocl_detect_fa_cmdmem(xdev);
+	if (ret) {
+		userpf_info(xdev, "Detect FA cmdmem failed, ret %d", ret);
+		goto out;
+	}
+
+out:
+	return ret;
+}
+
 /* The xocl_kds_update function should be called after xclbin is
  * downloaded. Do not use this function in other place.
  */
 int xocl_kds_update(struct xocl_dev *xdev, struct drm_xocl_kds cfg)
 {
 	int ret = 0;
-
-	xocl_kds_fa_clear(xdev);
-
-	/* SAIF TODO : How to handle first adapter */
-	ret = xocl_detect_fa_cmdmem(xdev);
-	if (ret) {
-		userpf_info(xdev, "Detect FA cmdmem failed, ret %d", ret);
-		goto out;
-	}
 
 	if (CFG_GPIO_OPS(xdev))
 		XDEV(xdev)->kds.cu_intr_cap = 1;
