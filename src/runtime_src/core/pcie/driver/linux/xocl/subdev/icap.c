@@ -96,6 +96,12 @@ static struct key *icap_keys = NULL;
 
 static struct attribute_group icap_attr_group;
 
+enum icap_slot_type {
+	ICAP_SLOT_PL = 0,
+	ICAP_SLOT_PS,
+	ICAP_SLOT_IPU,
+};
+
 enum icap_sec_level {
 	ICAP_SEC_NONE = 0,
 	ICAP_SEC_DEDICATE,
@@ -138,6 +144,7 @@ struct icap_bitstream_user {
 
 struct icap_slot_info {
 	uint32_t		slot_idx;
+	enum icap_slot_typ	slot_type;
 	struct mutex		icap_slot_lock;
 	xuid_t			icap_bitstream_uuid;
 	int			icap_bitstream_ref;
@@ -166,6 +173,8 @@ struct icap_slot_info {
 	int			reader_ref;
 	wait_queue_head_t	reader_wq;
 
+	enum icap_sec_level	sec_level;
+
 	uint32_t		data_retention;
 };
 
@@ -191,8 +200,6 @@ struct icap {
 	char			rp_vbnv[128];
 
 	struct bmc		bmc_header;
-
-	enum icap_sec_level	sec_level;
 
 	struct icap_slot	*icap_slot[ICAP_MAX_SLOT];
 };
@@ -719,11 +726,11 @@ static int calibrate_mig(struct icap *icap)
 	return 0;
 }
 
-static inline void xclbin_free_clock_freq_topology(struct icap *icap)
+static inline void xclbin_free_clock_freq_topology(struct icap_slot *islot)
 {
-	vfree(icap->xclbin_clock_freq_topology);
-	icap->xclbin_clock_freq_topology = NULL;
-	icap->xclbin_clock_freq_topology_length = 0;
+	vfree(islot->xclbin_clock_freq_topology);
+	islot->xclbin_clock_freq_topology = NULL;
+	islot->xclbin_clock_freq_topology_length = 0;
 }
 
 static void xclbin_write_clock_freq(struct clock_freq *dst, struct clock_freq *src)
@@ -735,28 +742,29 @@ static void xclbin_write_clock_freq(struct clock_freq *dst, struct clock_freq *s
 
 
 static int icap_cache_clock_freq_topology(struct icap *icap,
-	const struct axlf *xclbin)
+	const struct axlf *xclbin, uint32_t slot_id)
 {
 	int i;
-	struct clock_freq_topology *topology;
+	struct clock_freq_topology *topology = NULL;
 	struct clock_freq *clk_freq = NULL;
 	const struct axlf_section_header *hdr =
 		xrt_xclbin_get_section_hdr(xclbin, CLOCK_FREQ_TOPOLOGY);
+	icap_slot_info *islot = icap->icap_slot[slot_id];
 
 	/* Can't find CLOCK_FREQ_TOPOLOGY, just return*/
 	if (!hdr)
 		return 0;
 
-	xclbin_free_clock_freq_topology(icap);
+	xclbin_free_clock_freq_topology(islot);
 
-	icap->xclbin_clock_freq_topology = vzalloc(hdr->m_sectionSize);
-	if (!icap->xclbin_clock_freq_topology)
+	islot->xclbin_clock_freq_topology = vzalloc(hdr->m_sectionSize);
+	if (!islot->xclbin_clock_freq_topology)
 		return -ENOMEM;
 
 	topology = (struct clock_freq_topology *)(((char *)xclbin) + hdr->m_sectionOffset);
 
 	/*
-	 *  icap->xclbin_clock_freq_topology->m_clock_freq
+	 *  islot->xclbin_clock_freq_topology->m_clock_freq
 	 *  must follow the order
 	 *
 	 *	0: DATA_CLK
@@ -764,14 +772,14 @@ static int icap_cache_clock_freq_topology(struct icap *icap,
 	 *	2: SYSTEM_CLK
 	 *
 	 */
-	icap->xclbin_clock_freq_topology->m_count = topology->m_count;
+	islot->xclbin_clock_freq_topology->m_count = topology->m_count;
 	for (i = 0; i < topology->m_count; ++i) {
 		if (topology->m_clock_freq[i].m_type == CT_SYSTEM)
-			clk_freq = &icap->xclbin_clock_freq_topology->m_clock_freq[SYSTEM_CLK];
+			clk_freq = &islot->xclbin_clock_freq_topology->m_clock_freq[SYSTEM_CLK];
 		else if (topology->m_clock_freq[i].m_type == CT_DATA)
-			clk_freq = &icap->xclbin_clock_freq_topology->m_clock_freq[DATA_CLK];
+			clk_freq = &islot->xclbin_clock_freq_topology->m_clock_freq[DATA_CLK];
 		else if (topology->m_clock_freq[i].m_type == CT_KERNEL)
-			clk_freq = &icap->xclbin_clock_freq_topology->m_clock_freq[KERNEL_CLK];
+			clk_freq = &islot->xclbin_clock_freq_topology->m_clock_freq[KERNEL_CLK];
 		else
 			break;
 
@@ -1235,12 +1243,13 @@ end:
 	return ret;
 }
 
-static long axlf_set_freqscaling(struct icap *icap)
+static long axlf_set_freqscaling(struct icap *icap, uint32_t slot_id)
 {
-	BUG_ON(!mutex_is_locked(&icap->icap_lock));
+	icap_slot_info *islot = icap->icap_slot[slot_id];
+	BUG_ON(!mutex_is_locked(&islot->icap_lock));
 
 	return xocl_clock_freq_scaling_by_topo(xocl_get_xdev(icap->icap_pdev),
-	    icap->xclbin_clock_freq_topology, 0);
+	    islot->xclbin_clock_freq_topology, 0);
 }
 
 static int icap_download_bitstream(struct icap *icap, const struct axlf *axlf)
@@ -1639,13 +1648,15 @@ done:
 	return err;
 }
 
-static int icap_create_post_download_subdevs(struct platform_device *pdev, struct axlf *xclbin)
+static int icap_create_post_download_subdevs(struct platform_device *pdev,
+					struct axlf *xclbin, uint32_t slot_id)
 {
 	struct icap *icap = platform_get_drvdata(pdev);
+	icap_slot_info *islot = icap->icap_slot[slot_id];
 	int err = 0, i = 0;
 	xdev_handle_t xdev = xocl_get_xdev(pdev);
-	struct ip_layout *ip_layout = icap->ip_layout;
-	struct mem_topology *mem_topo = icap->mem_topo;
+	struct ip_layout *ip_layout = islot->ip_layout;
+	struct mem_topology *mem_topo = islot->mem_topo;
 	uint32_t memidx = 0;
 
 	BUG_ON(!ICAP_PRIVILEGED(icap));
@@ -1666,7 +1677,8 @@ static int icap_create_post_download_subdevs(struct platform_device *pdev, struc
 		if (ip->m_type == IP_KERNEL)
 			continue;
 
-		if (ip->m_type == IP_DDR4_CONTROLLER && !strncasecmp(ip->m_name, "SRSR", 4)) {
+		if (ip->m_type == IP_DDR4_CONTROLLER &&
+			 !strncasecmp(ip->m_name, "SRSR", 4)) {
 			struct xocl_subdev_info subdev_info = XOCL_DEVINFO_SRSR;
 			uint32_t idx = 0;
 
@@ -1864,10 +1876,11 @@ static int __icap_peer_xclbin_download(struct icap *icap, struct axlf *xclbin,
 	return 0;
 }
 
-static int icap_verify_signature(struct icap *icap,
+static int icap_verify_signature(struct icap *icap, uint32_t slot_id,
 	const void *data, size_t data_len, const void *sig, size_t sig_len)
 {
 	int ret = 0;
+	icap_slot_info *islot = icap->icap_slot[slot_id];
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 7, 0) && defined(CONFIG_SYSTEM_DATA_VERIFICATION)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
@@ -1877,11 +1890,11 @@ static int icap_verify_signature(struct icap *icap,
 #define	SYS_KEYS	((void *)1UL)
 #endif
 	ret = verify_pkcs7_signature(data, data_len, sig, sig_len,
-		(icap->sec_level == ICAP_SEC_SYSTEM) ? SYS_KEYS : icap_keys,
+		(islot->sec_level == ICAP_SEC_SYSTEM) ? SYS_KEYS : icap_keys,
 		VERIFYING_UNSPECIFIED_SIGNATURE, NULL, NULL);
 	if (ret) {
 		ICAP_ERR(icap, "signature verification failed: %d", ret);
-		if (icap->sec_level == ICAP_SEC_NONE) {
+		if (islot->sec_level == ICAP_SEC_NONE) {
 			/* Ignore error to allow bitstream downloading. */
 			ret = 0;
 		} else {
@@ -1898,15 +1911,16 @@ static int icap_verify_signature(struct icap *icap,
 	return ret;
 }
 
-static int icap_refresh_clock_freq(struct icap *icap, struct axlf *xclbin)
+static int icap_refresh_clock_freq(struct icap *icap, struct axlf *xclbin,
+				   uint32_t slot_id)
 {
 	xdev_handle_t xdev = xocl_get_xdev(icap->icap_pdev);
 	int err = 0;
 
 	if (ICAP_PRIVILEGED(icap) && !XOCL_DSA_IS_SMARTN(xdev)) {
-		err = icap_cache_clock_freq_topology(icap, xclbin);
+		err = icap_cache_clock_freq_topology(icap, xclbin, slot_id);
 		if (!err) {
-			err = axlf_set_freqscaling(icap);
+			err = axlf_set_freqscaling(icap, slot_id);
 			/* No clock subdev is ok? */
 			err = err == -ENODEV ? 0 : err;
 		}
@@ -1916,9 +1930,8 @@ static int icap_refresh_clock_freq(struct icap *icap, struct axlf *xclbin)
 	return err;
 }
 
-static void icap_save_calib(struct icap *icap)
+static void icap_save_calib(struct icap *icap, struct mem_topology *mem_topo)
 {
-	struct mem_topology *mem_topo = icap->mem_topo;
 	int err = 0, i = 0, ddr_idx = -1;
 	xdev_handle_t xdev = xocl_get_xdev(icap->icap_pdev);
 
@@ -2059,9 +2072,11 @@ static int icap_calib_and_check(struct platform_device *pdev)
 	return icap_calibrate_mig(pdev);
 }
 
-static int icap_verify_signed_signature(struct icap *icap, struct axlf *xclbin)
+static int icap_verify_signed_signature(struct icap *icap,
+					struct axlf *xclbin, uint32_t slot_id)
 {
 	int err = 0;
+	icap_slot_info *islot = icap->icap_slot[slot_id];
 
 	if (xclbin->m_signature_length != -1) {
 		int siglen = xclbin->m_signature_length;
@@ -2079,7 +2094,7 @@ static int icap_verify_signed_signature(struct icap *icap, struct axlf *xclbin)
 			((char *)xclbin) + origlen, siglen);
 		if (err)
 			goto out;
-	} else if (icap->sec_level > ICAP_SEC_NONE) {
+	} else if (islot->sec_level > ICAP_SEC_NONE) {
 		ICAP_ERR(icap, "xclbin is not signed, rejected");
 		err = -EKEYREJECTED;
 		goto out;
@@ -2139,19 +2154,21 @@ static int icap_probe_urpdev_by_id(struct platform_device *pdev,
 	return found ? err : -ENODATA;
 }
 
-static int __icap_xclbin_download(struct icap *icap, struct axlf *xclbin, bool sref)
+static int __icap_xclbin_download(struct icap *icap, struct axlf *xclbin,
+				  bool sref, uint32_t slot_id)
 {
+	icap_slot_info *islot = icap->icap_slot[slot_id];
 	xdev_handle_t xdev = xocl_get_xdev(icap->icap_pdev);
 	int err = 0;
-	bool retention = ((icap->data_retention & 0x1) == 0x1) && sref;
+	bool retention = ((islot->data_retention & 0x1) == 0x1) && sref;
 
 	BUG_ON(!mutex_is_locked(&icap->icap_lock));
 
-	err = icap_verify_signed_signature(icap, xclbin);
+	err = icap_verify_signed_signature(icap, xclbin, slot_id);
 	if (err)
 		goto out;
 
-	err = icap_refresh_clock_freq(icap, xclbin);
+	err = icap_refresh_clock_freq(icap, xclbin, slot_id);
 	if (err)
 		goto out;
 
@@ -2177,7 +2194,7 @@ static int __icap_xclbin_download(struct icap *icap, struct axlf *xclbin, bool s
 		if (err)
 			goto out;
 	} else {
-		uuid_copy(&icap->icap_bitstream_uuid, &xclbin->m_header.uuid);
+		uuid_copy(&islot->icap_bitstream_uuid, &xclbin->m_header.uuid);
 		ICAP_INFO(icap, "xclbin is generated for flat shell, dont need to program the bitstream ");
 		err = xocl_clock_freq_rescaling(xdev, true);
 		if (err)
@@ -2185,7 +2202,7 @@ static int __icap_xclbin_download(struct icap *icap, struct axlf *xclbin, bool s
 	}
 
 	/* calibrate hbm and ddr should be performed when resources are ready */
-	err = icap_create_post_download_subdevs(icap->icap_pdev, xclbin);
+	err = icap_create_post_download_subdevs(icap->icap_pdev, xclbin, slot_id);
 	if (err)
 		goto out;
 
@@ -2271,14 +2288,15 @@ static inline int icap_xmc_free(struct icap *icap)
 }
 
 static bool check_mem_topo_and_data_retention(struct icap *icap,
-	struct axlf *xclbin)
+	struct axlf *xclbin, uint32_t slot_id)
 {
-	struct mem_topology *mem_topo = icap->mem_topo;
+	icap_slot_info *islot = icap->icap_slot[slot_id];
+	struct mem_topology *mem_topo = islot->mem_topo;
 	const struct axlf_section_header *hdr =
 		xrt_xclbin_get_section_hdr(xclbin, MEM_TOPOLOGY);
 	uint64_t size = 0, offset = 0;
 
-	if (!hdr || !mem_topo || !icap->data_retention)
+	if (!hdr || !mem_topo || !islot->data_retention)
 		return false;
 
 	size = hdr->m_sectionSize;
@@ -2300,7 +2318,8 @@ static bool check_mem_topo_and_data_retention(struct icap *icap,
 	return true;
 }
 
-static void icap_cache_max_host_mem_aperture(struct icap *icap)
+static void icap_cache_max_host_mem_aperture(struct icap *icap,
+					     uint32_t slot_id)
 {
 	int i = 0;
 	struct mem_topology *mem_topo = icap->mem_topo;
@@ -2319,7 +2338,8 @@ static void icap_cache_max_host_mem_aperture(struct icap *icap)
 			islot->max_host_mem_aperture = mem_topo->m_mem_data[i].m_size << 10;
 
 		if (IS_HOST_MEM(mem_topo->m_mem_data[i].m_tag))
-			islot->max_host_mem_aperture = mem_topo->m_mem_data[i].m_size << 10;
+			islot->max_host_mem_aperture =
+				mem_topo->m_mem_data[i].m_size << 10;
 	}
 
 	return;
@@ -2416,10 +2436,11 @@ done:
  * NOTE: any steps above can fail, return err and set uuid to NULL.
  */
 static int __icap_download_bitstream_mgmt(struct platform_device *pdev,
-	struct axlf *xclbin)
+	struct axlf *xclbin, uint32_t slot_id)
 {
 	struct icap *icap = platform_get_drvdata(pdev);
 	xdev_handle_t xdev = xocl_get_xdev(pdev);
+	icap_slot_info *islot = icap->icap_slot[slot_id];
 	bool sref = false;
 	int err = 0;
 
@@ -2428,17 +2449,18 @@ static int __icap_download_bitstream_mgmt(struct platform_device *pdev,
 		return err;
 
 	/* TODO: why void, ignoring any errors */
-	icap_save_calib(icap);
+	icap_save_calib(icap, islot->mem_topo);
 
+	/* SAIF TODO : Does this API also destroy CUs/SCUs */
 	/* remove any URP subdev before downloading xclbin */
 	xocl_subdev_destroy_by_level(xdev, XOCL_SUBDEV_LEVEL_URP);
 
 	/* Check the incoming mem topology with the current one before overwrite */
-	sref = check_mem_topo_and_data_retention(icap, xclbin);
-	icap_cache_bitstream_axlf_section(pdev, xclbin, MEM_TOPOLOGY);
-	icap_cache_bitstream_axlf_section(pdev, xclbin, IP_LAYOUT);
+	sref = check_mem_topo_and_data_retention(icap, xclbin, slot_id);
+	icap_cache_bitstream_axlf_section(pdev, xclbin, MEM_TOPOLOGY, slot_id);
+	icap_cache_bitstream_axlf_section(pdev, xclbin, IP_LAYOUT, slot_id);
 
-	err = __icap_xclbin_download(icap, xclbin, sref);
+	err = __icap_xclbin_download(icap, xclbin, sref, slot_id);
 	if (err)
 		goto done;
 
@@ -2484,7 +2506,7 @@ static int __icap_download_bitstream_axlf(struct platform_device *pdev,
 		&xclbin->m_header.uuid, &islot->icap_bitstream_uuid);
 
 	return ICAP_PRIVILEGED(icap) ?
-		__icap_download_bitstream_mgmt(pdev, xclbin) :
+		__icap_download_bitstream_mgmt(pdev, xclbin, slot_id) :
 		__icap_download_bitstream_user(pdev, xclbin, force_download,
 					       slot_id);
 }
@@ -2521,7 +2543,8 @@ static int icap_download_bitstream_axlf(struct platform_device *pdev,
 
 	header = xrt_xclbin_get_section_hdr(xclbin, PARTITION_METADATA);
 	bitstream = xrt_xclbin_get_section_hdr(xclbin, BITSTREAM);
-	bitstream_part_pdi = xrt_xclbin_get_section_hdr(xclbin, BITSTREAM_PARTIAL_PDI);
+	bitstream_part_pdi = xrt_xclbin_get_section_hdr(xclbin,
+							BITSTREAM_PARTIAL_PDI);
 	/* SAIF TODO : What does it mean */
 	/*
 	 * don't check uuid if the xclbin is a lite one

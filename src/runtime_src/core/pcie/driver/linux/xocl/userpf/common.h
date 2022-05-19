@@ -103,8 +103,6 @@ struct xocl_dev	{
 	struct xocl_subdev	*dyn_subdev_store;
 	int			dyn_subdev_num;
 
-	void			*ulp_blob;
-
 	unsigned int		mbx_offset;
 
 	uint64_t		mig_cache_expire_secs;
