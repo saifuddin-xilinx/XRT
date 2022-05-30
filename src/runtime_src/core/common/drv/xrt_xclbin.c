@@ -197,7 +197,8 @@ xrt_xclbin_kind_to_string(enum axlf_section_kind kind)
 }
 
 const struct axlf_section_header *
-xrt_xclbin_get_section_hdr(const struct axlf *xclbin, enum axlf_section_kind kind)
+xrt_xclbin_get_section_hdr(const struct axlf *xclbin,
+			   enum axlf_section_kind kind)
 {
 	int i = 0;
 
