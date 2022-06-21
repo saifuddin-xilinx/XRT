@@ -245,7 +245,7 @@ u32 get_live_clients(struct xocl_dev *xdev, pid_t **plist)
 	return c;
 }
 
-static bool xclbin_downloaded(struct xocl_dev *xdev, xuid_t *xclbin_id)
+static bool xclbin_downloaded(struct xocl_dev *xdev, xuid_t *xclbin_id, uint32_t slot_id)
 {
 	bool ret = false;
 	int err = 0;
@@ -258,7 +258,7 @@ static bool xclbin_downloaded(struct xocl_dev *xdev, xuid_t *xclbin_id)
 		return false;
 	}
 
-	err = XOCL_GET_XCLBIN_ID(xdev, downloaded_xclbin);
+	err = XOCL_GET_XCLBIN_ID(xdev, downloaded_xclbin, slot_id);
 	if (err)
 		return ret;
 
@@ -266,7 +266,7 @@ static bool xclbin_downloaded(struct xocl_dev *xdev, xuid_t *xclbin_id)
 		ret = true;
 		userpf_info(xdev, "xclbin is already downloaded\n");
 	}
-	XOCL_PUT_XCLBIN_ID(xdev);
+	XOCL_PUT_XCLBIN_ID(xdev, slot_id);
 
 	return ret;
 }
@@ -320,7 +320,7 @@ static int xocl_preserve_mem(struct xocl_drm *drm_p,
 	 * Ignore this and keep disable preserve_mem if not for aws.
 	 */
 	if (xocl_icap_get_data(xdev, DATA_RETAIN) && (topology != NULL) &&
-	    drm_p->mm) {
+	    drm_p->xocl_mem->mm) {
 		if ((size == sizeof_sect(topology, m_mem_data)) &&
 		    !xocl_preserve_memcmp(new_topology, topology, size)) {
 			userpf_info(xdev, "preserving mem_topology.");
@@ -354,7 +354,7 @@ check_resolver(struct xocl_dev *xdev, struct axlf *axlf, uint32_t flags,
 	struct xocl_xclbin_cache *xclbin_cache = NULL;
 	int pr_idx = 0;
 	int slot_id = 0;
-	if (xclbin_downloaded(xdev, &axlf->m_header.uuid)) {
+	if (xclbin_downloaded(xdev, &axlf->m_header.uuid, slot_id)) {
 		if ((flags & XOCL_AXLF_FORCE_PROGRAM)) {
 			// We come here if user sets force_xclbin_program
 			// option "true" in xrt.ini under [Runtime] section
@@ -392,7 +392,6 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr)
 	struct axlf *axlf = NULL;
 	struct axlf bin_obj;
 	size_t size = 0;
-	int preserve_mem = 0;
 	bool buildin_ps_only = 0;
 	struct mem_topology *new_topology = NULL;
 	struct xocl_dev *xdev = drm_p->xdev;
@@ -598,14 +597,6 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr)
 
 	/* The finial step is to update KDS configuration */
 	if (!err) {
-		if (!buildin_ps_only) {
-			err = xocl_kds_fa_init(xdev);
-			if (err) {
-				xocl_icap_clean_bitstream(xdev, slot_id);
-				goto done;
-			}
-		}
-
 		err = xocl_kds_update(xdev, axlf_ptr->kds_cfg);
 		if (err) {
 			xocl_icap_clean_bitstream(xdev, slot_id);
@@ -713,7 +704,9 @@ int xocl_free_cma_ioctl(struct drm_device *dev, void *data,
 
 	mutex_lock(&xdev->dev_lock);
 
-	if (xocl_xclbin_in_use(xdev) || xocl_check_topology(drm_p))
+	/* SAIF TODO */
+	//if (xocl_xclbin_in_use(xdev) || xocl_check_topology(drm_p))
+	if (xocl_xclbin_in_use(xdev))
 		err = -EBUSY;
 	else
 		xocl_cma_bank_free(xdev);

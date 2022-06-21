@@ -120,6 +120,11 @@ static inline unsigned xocl_bo_ddr_idx(unsigned user_flags)
         return user_flags & XRT_BO_FLAGS_MEMIDX_MASK;
 }
 
+static inline unsigned xocl_bo_slot_idx(unsigned user_flags)
+{
+        return ((user_flags >> XRT_BO_FLAGS_SLOTIDX_SHIFT_BIT) & 0xFF);
+}
+
 static inline unsigned xocl_bo_type(unsigned user_flags)
 {
 	unsigned type = (user_flags & ~XRT_BO_FLAGS_MEMIDX_MASK);

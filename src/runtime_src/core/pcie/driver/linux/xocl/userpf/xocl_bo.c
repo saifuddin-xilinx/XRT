@@ -264,6 +264,7 @@ static inline int check_bo_user_reqs(const struct drm_device *dev,
 	struct xocl_dev *xdev = drm_p->xdev;
 	u16 ddr_count;
 	unsigned ddr;
+	unsigned slotidx = xocl_bo_slot_idx(flags);
 	struct mem_topology *topo = NULL;
 	int err = 0;
 
@@ -280,7 +281,7 @@ static inline int check_bo_user_reqs(const struct drm_device *dev,
 	ddr = xocl_bo_ddr_idx(flags);
 	if (ddr >= ddr_count)
 		return -EINVAL;
-	err = XOCL_GET_GROUP_TOPOLOGY(xdev, topo);
+	err = XOCL_GET_GROUP_TOPOLOGY(xdev, topo, slotidx);
 	if (err)
 		return err;
 
@@ -298,7 +299,7 @@ static inline int check_bo_user_reqs(const struct drm_device *dev,
 		}
 	}
 done:
-	XOCL_PUT_GROUP_TOPOLOGY(xdev);
+	XOCL_PUT_GROUP_TOPOLOGY(xdev, slotidx);
 	return err;
 }
 
@@ -363,6 +364,7 @@ static struct drm_xocl_bo *xocl_create_bo(struct drm_device *dev,
 	struct xocl_dev *xdev = drm_p->xdev;
 	struct drm_gem_object *obj;
 	unsigned memidx = xocl_bo_ddr_idx(user_flags);
+	unsigned slotidx = xocl_bo_slot_idx(user_flags);
 	bool xobj_inited = false;
 	int err = 0;
 
@@ -439,7 +441,7 @@ static struct drm_xocl_bo *xocl_create_bo(struct drm_device *dev,
 	xocl_xdev_dbg(xdev, "alloc bo from bank%u, flag %x, host bank %d",
 		memidx, xobj->flags, drm_p->cma_bank_idx);
 
-	err = xocl_mm_insert_node(drm_p, memidx, xobj->mm_node,
+	err = xocl_mm_insert_node(drm_p, memidx, slotidx, xobj->mm_node,
 		xobj->base.size);
 	if (err)
 		goto failed;
@@ -533,6 +535,7 @@ __xocl_create_bo_ioctl(struct drm_device *dev,
 	struct xocl_drm *drm_p = dev->dev_private;
 	struct xocl_dev *xdev = drm_p->xdev;
 	unsigned bo_type = xocl_bo_type(args->flags);
+	unsigned slotidx = xocl_bo_slot_idx(args->flags);
 	struct mem_topology *topo = NULL;
 	unsigned ddr = 0;
 	int ret;
@@ -553,7 +556,7 @@ __xocl_create_bo_ioctl(struct drm_device *dev,
 		 * DRM allocate contiguous pages, shift the vmapping with
 		 * bar address offset
 		 */
-		ret = XOCL_GET_GROUP_TOPOLOGY(xdev, topo);
+		ret = XOCL_GET_GROUP_TOPOLOGY(xdev, topo, slotidx);
 		if (ret)
 			goto out_free;
 
@@ -575,7 +578,7 @@ __xocl_create_bo_ioctl(struct drm_device *dev,
 				xobj->p2p_bar_offset = bar_off;
 		}
 
-		XOCL_PUT_GROUP_TOPOLOGY(xdev);
+		XOCL_PUT_GROUP_TOPOLOGY(xdev, slotidx);
 	}
 
 	if (xobj->flags & XOCL_PAGE_ALLOC) {
@@ -587,12 +590,12 @@ __xocl_create_bo_ioctl(struct drm_device *dev,
 		else if (xobj->flags & XOCL_CMA_MEM) {
 			uint64_t start_addr;
 
-			ret = XOCL_GET_GROUP_TOPOLOGY(xdev, topo);
+			ret = XOCL_GET_GROUP_TOPOLOGY(xdev, topo, slotidx);
 			if (ret)
 				goto out_free;
 			start_addr = topo->m_mem_data[ddr].m_base_address;
 			xobj->pages = xocl_cma_collect_pages(drm_p, start_addr, xobj->mm_node->start, xobj->base.size);
-			XOCL_PUT_GROUP_TOPOLOGY(xdev);
+			XOCL_PUT_GROUP_TOPOLOGY(xdev, slotidx);
 		}
 
 		if (IS_ERR(xobj->pages)) {
@@ -1475,14 +1478,14 @@ int xocl_usage_stat_ioctl(struct drm_device *dev, void *data,
 	int	i;
 
 	args->mm_channel_count = XOCL_DDR_COUNT(xdev);
-	if (args->mm_channel_count > 8)
-		args->mm_channel_count = 8;
+	if (args->mm_channel_count > XOCL_MAX_DDR_SUPPORT)
+		args->mm_channel_count = XOCL_MAX_DDR_SUPPORT;
 	for (i = 0; i < args->mm_channel_count; i++)
 		xocl_mm_get_usage_stat(drm_p, i, args->mm + i);
 
 	args->dma_channel_count = xocl_get_chan_count(xdev);
-	if (args->dma_channel_count > 8)
-		args->dma_channel_count = 8;
+	if (args->dma_channel_count > XOCL_MAX_DDR_SUPPORT)
+		args->dma_channel_count = XOCL_MAX_DDR_SUPPORT;
 
 	for (i = 0; i < args->dma_channel_count; i++) {
 		args->h2c[i] = xocl_get_chan_stat(xdev, i, 1);

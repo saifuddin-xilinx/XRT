@@ -110,6 +110,7 @@ static int xocl_pr_write_complete(struct fpga_manager *mgr,
 				  struct fpga_image_info *info)
 {
 	int result;
+	uint32_t slot_id = 0; // For backward compartability
 	struct xfpga_klass *obj = mgr->priv;
 	if (obj->state != FPGA_MGR_STATE_WRITE) {
 		obj->state = FPGA_MGR_STATE_WRITE_COMPLETE_ERR;
@@ -122,7 +123,7 @@ static int xocl_pr_write_complete(struct fpga_manager *mgr,
 		return -EINVAL;
 	}
 	/* Send the xclbin blob to actual download framework in icap */
-	result = xocl_icap_download_axlf(obj->xdev, obj->blob, false);
+	result = xocl_icap_download_axlf(obj->xdev, obj->blob, false, slot_id); 
 	obj->state = result ? FPGA_MGR_STATE_WRITE_COMPLETE_ERR : FPGA_MGR_STATE_WRITE_COMPLETE;
 	xocl_info(&mgr->dev, "Finish download of xclbin %pUb of size %zu B", &obj->blob->m_header.uuid, obj->count);
 	vfree(obj->blob);

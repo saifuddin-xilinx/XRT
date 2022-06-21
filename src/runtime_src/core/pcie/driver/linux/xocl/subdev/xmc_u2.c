@@ -2471,47 +2471,55 @@ static ssize_t read_temp_by_mem_topology(struct file *filp,
 	struct kobject *kobj, struct bin_attribute *attr, char *buffer,
 	loff_t offset, size_t count)
 {
-	u32 nread = 0;
-	size_t size = 0;
-	u32 i;
-	int err = 0;
-	struct mem_topology *memtopo = NULL;
-	struct xocl_xmc *xmc =
-		dev_get_drvdata(container_of(kobj, struct device, kobj));
-	uint32_t *temp = NULL;
-	xdev_handle_t xdev = xocl_get_xdev(xmc->pdev);
+        u32 nread = 0;
+        u32 f_nread = 0;
+        size_t size = 0;
+        u32 i;
+        int err = 0;
+        int st = 0;
+        struct mem_topology *memtopo = NULL;
+        struct xocl_xmc *xmc =
+                dev_get_drvdata(container_of(kobj, struct device, kobj));
+        uint32_t *temp = NULL;
+        xdev_handle_t xdev = xocl_get_xdev(xmc->pdev);
 
-	err = xocl_icap_get_xclbin_metadata(xdev, MEMTOPO_AXLF,
-		(void **)&memtopo);
-	if (err)
-		return nread;
+        for (st = 0; st < XOCL_MAX_SLOT_SUPPORT; st++) {
+                err = xocl_icap_get_xclbin_metadata(xdev, MEMTOPO_AXLF,
+                                (void **)&memtopo, st);
+                if (err)
+                        return f_nread;
 
-	if (!memtopo)
-		goto done;
+                if (!memtopo)
+                        continue;
 
-	size = sizeof(u32)*(memtopo->m_count);
+                size = sizeof(u32)*(memtopo->m_count);
 
-	if (offset >= size)
-		goto done;
+                if (offset >= size) {
+                        xocl_icap_put_xclbin_metadata(xdev, st);
+                        return f_nread;
+                }
 
-	temp = vzalloc(size);
-	if (!temp)
-		goto done;
+                temp = vzalloc(size);
+                if (!temp) {
+                        xocl_icap_put_xclbin_metadata(xdev, st);
+                        return f_nread;
+                }
 
-	for (i = 0; i < memtopo->m_count; ++i)
-		*(temp+i) = get_temp_by_m_tag(xmc, memtopo->m_mem_data[i].m_tag);
+                for (i = 0; i < memtopo->m_count; ++i)
+                        *(temp+i) = get_temp_by_m_tag(xmc, memtopo->m_mem_data[i].m_tag);
 
-	if (count < size - offset)
-		nread = count;
-	else
-		nread = size - offset;
+                if (count < size - offset)
+                        nread = count;
+                else
+                        nread = size - offset;
 
-	memcpy(buffer, temp, nread);
-done:
-	xocl_icap_put_xclbin_metadata(xdev);
-	vfree(temp);
-	/* xocl_icap_unlock_bitstream */
-	return nread;
+                memcpy(buffer, temp, nread);
+                buffer += nread;
+                f_nread += nread;
+                vfree(temp);
+        }
+
+        return f_nread;
 }
 
 static struct bin_attribute bin_dimm_temp_by_mem_topology_attr = {

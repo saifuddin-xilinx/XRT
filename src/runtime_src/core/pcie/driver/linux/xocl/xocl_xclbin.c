@@ -253,14 +253,14 @@ int xocl_xclbin_download(xdev_handle_t xdev, const void *xclbin,
 						 &xgq_ops);
 		/* Legacy shell doesn't have xgq resources */
 		if (rval == -ENODEV)
-			return xocl_xclbin_download_impl(xdev, xclbin, slot_id
+			return xocl_xclbin_download_impl(xdev, xclbin, slot_id,
 							 &versal_ops);
 	} else {
 		/*
 		 * TODO:
 		 * return xocl_xclbin_download_impl(xdev, xclbin, slot_id, &icap_ops);
 		 */
-		rval = xocl_icap_download_axlf(xdev, xclbin, slot_id, false);
+		rval = xocl_icap_download_axlf(xdev, xclbin, false, slot_id);
 		if (!rval && XOCL_DSA_IS_MPSOC(xdev))
 			rval = xocl_xclbin_download_impl(xdev, xclbin, slot_id,
 							 &mpsoc_ops);
