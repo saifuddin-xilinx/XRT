@@ -223,7 +223,7 @@ int xocl_client_ioctl(struct xocl_dev *xdev, int op, void *data,
 		      struct drm_file *filp);
 int xocl_poll_client(struct file *filp, poll_table *wait, void *priv);
 int xocl_kds_stop(struct xocl_dev *xdev);
-int xocl_kds_reset(struct xocl_dev *xdev, const xuid_t *xclbin_id);
+int xocl_kds_reset(struct xocl_dev *xdev);
 int xocl_kds_reconfig(struct xocl_dev *xdev);
 int xocl_cu_map_addr(struct xocl_dev *xdev, u32 cu_idx,
 		     struct drm_file *filp, unsigned long size, u32 *addrp);

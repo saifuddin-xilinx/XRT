@@ -606,7 +606,8 @@ static int xclmgmt_icap_get_data_impl(struct xclmgmt_dev *lro, void *buf)
 	int err = 0;
 	xuid_t *xclbin_id = NULL;
 
-	err = XOCL_GET_XCLBIN_ID(lro, xclbin_id);
+	/* SAIF TODO : Need to use slot information here */
+	err = XOCL_GET_XCLBIN_ID(lro, xclbin_id, 0 /*  dummy slot */);
 	if (err)
 		return err;
 
@@ -623,7 +624,7 @@ static int xclmgmt_icap_get_data_impl(struct xclmgmt_dev *lro, void *buf)
 	hwicap->mig_calib = lro->ready ? xocl_icap_get_data(lro, MIG_CALIB) : 0;
 	hwicap->data_retention = xocl_icap_get_data(lro, DATA_RETAIN);
 
-	XOCL_PUT_XCLBIN_ID(lro);
+	XOCL_PUT_XCLBIN_ID(lro, 0 /*  dummy slot */);
 
 	return 0;
 }
@@ -937,6 +938,7 @@ void xclmgmt_mailbox_srv(void *arg, void *data, size_t len,
 	}
 	case XCL_MAILBOX_REQ_LOAD_XCLBIN: {
 		uint64_t xclbin_len = 0;
+		uint32_t slot_id = (uint32_t)req->flags;
 		struct axlf *xclbin = (struct axlf *)req->data;
 		bool fetch = (atomic_read(&lro->config_xclbin_change) == 1);
 
@@ -961,7 +963,7 @@ void xclmgmt_mailbox_srv(void *arg, void *data, size_t len,
 		if (fetch)
 			ret = xclmgmt_xclbin_fetch_and_download(lro, xclbin);
 		else
-			ret = xocl_xclbin_download(lro, xclbin);
+			ret = xocl_xclbin_download(lro, xclbin, slot_id);
 
 		(void) xocl_peer_response(lro, req->req, msgid, &ret,
 			sizeof(ret));

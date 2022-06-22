@@ -621,6 +621,7 @@ struct xocl_dev_core {
 	struct completion	api_comp;
 	int			api_call_cnt;
 
+	int 			max_slot_id;
 	struct xocl_xclbin_cache *xclbin_cache[XOCL_MAX_SLOT_SUPPORT];
 
 	/*

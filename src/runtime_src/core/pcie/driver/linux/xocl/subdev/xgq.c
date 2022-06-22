@@ -808,7 +808,8 @@ static int xgq_program_scfw(struct platform_device *pdev)
 {
 	struct xocl_xgq_vmr *xgq = platform_get_drvdata(pdev);
 
-	return xgq_transfer_data(xgq, NULL, 0,
+	/* SAIF TODO : Hard_coding slot id for backward compartability */ 
+	return xgq_transfer_data(xgq, NULL, 0, 0 /* Dummy Slot */,
 		XGQ_CMD_OP_PROGRAM_SCFW, XOCL_XGQ_DOWNLOAD_TIME);
 }
 
@@ -1455,8 +1456,9 @@ static int xgq_download_apu_bin(struct platform_device *pdev, char *buf,
 	struct xocl_xgq_vmr *xgq = platform_get_drvdata(pdev);
 	int ret = 0;
 
-	ret = xgq_transfer_data(xgq, buf, len, XGQ_CMD_OP_LOAD_APUBIN,
-		XOCL_XGQ_DOWNLOAD_TIME);
+	/* SAIF TODO : Hard_coding slot id for backward compartability */ 
+	ret = xgq_transfer_data(xgq, buf, len, 0 /* Dummy Slot */,
+			XGQ_CMD_OP_LOAD_APUBIN, XOCL_XGQ_DOWNLOAD_TIME);
 	if (ret != len) {
 		XGQ_ERR(xgq, "return %d, but request %ld", ret, len);
 		ret = -EIO;
@@ -1998,7 +2000,8 @@ static ssize_t xgq_ospi_write(struct file *filp, const char __user *udata,
 		goto done;
 	}
 
-	ret = xgq_transfer_data(xgq, kdata, data_len,
+	/* SAIF TODO : Hard_coding slot id for backward compartability */ 
+	ret = xgq_transfer_data(xgq, kdata, data_len, 0 /* Dummy Slot */,
 		XGQ_CMD_OP_DOWNLOAD_PDI, XOCL_XGQ_FLASH_TIME);
 done:
 	vfree(kdata);

@@ -29,15 +29,20 @@ static ssize_t xclbinuuid_show(struct device *dev,
 	struct xocl_dev *xdev = dev_get_drvdata(dev);
 	xuid_t *xclbin_id = NULL;
 	ssize_t cnt = 0;
-	int err = 0;
+	ssize_t size = 0;
+	int err = 0, i = 0;
 
-	err = XOCL_GET_XCLBIN_ID(xdev, xclbin_id);
-	if (err)
-		return cnt;
+	for (i = 0; i < xdev->max_slot_id; i++) {
+		err = XOCL_GET_XCLBIN_ID(xdev, xclbin_id, i);
+		if (err)
+			continue;
 
-	cnt = sprintf(buf, "%pUb\n", xclbin_id ? xclbin_id : 0);
-	XOCL_PUT_XCLBIN_ID(xdev);
-	return cnt;
+		cnt = sprintf(buf + size, "%pUb\n", xclbin_id ? xclbin_id : 0);
+		size += count;
+		XOCL_PUT_XCLBIN_ID(xdev, i);
+	}
+
+	return size;
 }
 
 static DEVICE_ATTR_RO(xclbinuuid);
@@ -98,6 +103,9 @@ static ssize_t kdsstat_show(struct device *dev,
 	pid_t *plist = NULL;
 	u32 clients, i;
 
+	/* SAIF TODO : Need not add xclbin to this sysfs. 
+	 * Now XCLBIN is per slot but KDS stats are global accross slots */
+#if 0
 	err = XOCL_GET_XCLBIN_ID(xdev, xclbin_id);
 	if (err) {
 		size += sprintf(buf + size, "unable to give xclbin id");
@@ -106,6 +114,8 @@ static ssize_t kdsstat_show(struct device *dev,
 
 	size += sprintf(buf + size, "xclbin:\t\t\t%pUb\n",
 		xclbin_id ? xclbin_id : 0);
+#endif
+
 	size += sprintf(buf + size, "outstanding execs:\t%d\n",
 		atomic_read(&xdev->outstanding_execs));
 	size += sprintf(buf + size, "total execs:\t\t%lld\n",
@@ -117,7 +127,11 @@ static ssize_t kdsstat_show(struct device *dev,
 	for (i = 0; i < clients; i++)
 		size += sprintf(buf + size, "\t\t\t%d\n", plist[i]);
 	vfree(plist);
+
+#if 0
 	XOCL_PUT_XCLBIN_ID(xdev);
+#endif
+
 	return size;
 }
 static DEVICE_ATTR_RO(kdsstat);
@@ -139,7 +153,12 @@ static ssize_t xocl_mm_stat(struct xocl_dev *xdev, char *buf, bool raw)
 
 	mutex_lock(&xdev->dev_lock);
 
-	err = XOCL_GET_GROUP_TOPOLOGY(xdev, topo);
+	/* SAIF TODO : I believe, we should maintain a mem_topology section under
+	 * xocl_drm staructure. As memory is global for a device. Based on the xclbin
+	 * load/unload only usgaes will change. But topology remains same. 
+	 * . For currently using default slot as \"0\" to retrive the topology 
+	 * information from icap */
+	err = XOCL_GET_GROUP_TOPOLOGY(xdev, topo, 0 /* Default slot id */);
 	if (err) {
 		mutex_unlock(&xdev->dev_lock);
 		return err;
@@ -210,7 +229,7 @@ static ssize_t xocl_mm_stat(struct xocl_dev *xdev, char *buf, bool raw)
 	}
 
 done:
-	XOCL_PUT_GROUP_TOPOLOGY(xdev);
+	XOCL_PUT_GROUP_TOPOLOGY(xdev, 0 /* Default slot id */);
 	mutex_unlock(&xdev->dev_lock);
 	return size;
 }
@@ -706,17 +725,20 @@ static ssize_t ulp_uuids_show(struct device *dev,
 {
 	struct xocl_dev *xdev = dev_get_drvdata(dev);
 	const void *uuid;
-	int node = -1, off = 0;
+	int node = -1, off = 0, i = 0;
 
-	if (!xdev->ulp_blob || fdt_check_header(xdev->ulp_blob))
-		return -EINVAL;
+	for (i = 0; i < xdev->max_slot_id; i++) {
+		if (!xdev->xclbin_cache[i].ulp_blob || fdt_check_header(xdev->xclbin_cache[i].ulp_blob))
+			return -EINVAL;
 
-	for (node = xocl_fdt_get_next_prop_by_name(xdev, xdev->ulp_blob,
-		-1, PROP_INTERFACE_UUID, &uuid, NULL);
-	    uuid && node > 0;
-	    node = xocl_fdt_get_next_prop_by_name(xdev, xdev->ulp_blob,
-		node, PROP_INTERFACE_UUID, &uuid, NULL))
-		off += sprintf(buf + off, "%s\n", (char *)uuid);
+		for (node = xocl_fdt_get_next_prop_by_name(xdev, xdev->xclbin_cache[i].ulp_blob,
+					-1, PROP_INTERFACE_UUID, &uuid, NULL);
+				uuid && node > 0;
+				node = xocl_fdt_get_next_prop_by_name(xdev, xdev->xclbin_cache[i].ulp_blob,
+					node, PROP_INTERFACE_UUID, &uuid, NULL)) {
+			off += sprintf(buf + off, "%s\n", (char *)uuid);
+		}
+	}
 
 	return off;
 }

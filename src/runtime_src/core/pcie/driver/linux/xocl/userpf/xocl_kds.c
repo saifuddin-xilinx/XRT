@@ -180,14 +180,16 @@ xocl_ctx_to_info(struct drm_xocl_ctx *args, struct kds_ctx_info *info)
 }
 
 static struct kds_client_ctx *
-xocl_ctx_check(struct kds_client *client, uint32_t slot_id)
+xocl_check_exists_context(struct kds_client *client, const uuid_t *id,
+		uint32_t slot_id)
 {
 	struct kds_client_ctx *curr = NULL;
 
 	/* Find whether the xclbin is already loaded and the context is exists
 	*/
 	list_for_each_entry(curr, &client->ctx_list, link)
-		if (uuid_equal(curr->slot_idx, slot_id))
+		if (uuid_equal(curr->xclbin_id, id) &&
+				(curr->slot_idx == slot_id))
 			break;
 
 	/* Not found any matching context */
@@ -206,9 +208,15 @@ static int xocl_add_context(struct xocl_dev *xdev, struct kds_client *client,
 	xuid_t *uuid;
 	int ret;
 
+        uuid = vmalloc(sizeof(uuid_t));
+        if (!uuid)
+                return -ENOMEM;
+
+        uuid_copy(uuid, &args->xclbin_id);
+
 	mutex_lock(&client->lock);
 	/* If this client has no opened context, lock bitstream */
-	cctx = xocl_ctx_check(client, slot_id);
+	cctx = xocl_check_exists_context(client, uuid, slot_id);
 	if (!cctx) {
 		/* Allocate the new client context and store the xclbin */
 		cctx = vzalloc(sizeof(struct kds_client_ctx));
@@ -220,12 +228,7 @@ static int xocl_add_context(struct xocl_dev *xdev, struct kds_client *client,
 		ret = xocl_icap_lock_bitstream(xdev, &args->xclbin_id, slot_id);
 		if (ret)
 			goto out;
-		uuid = vzalloc(sizeof(*uuid));
-		if (!uuid) {
-			ret = -ENOMEM;
-			goto out1;
-		}
-		uuid_copy(uuid, &args->xclbin_id);
+		
 		cctx->xclbin_id = uuid;
 		cctx->slot_idx = slot_id;
 
@@ -239,7 +242,6 @@ static int xocl_add_context(struct xocl_dev *xdev, struct kds_client *client,
 	info.curr_ctx = (void *)cctx;
 	ret = kds_add_context(&XDEV(xdev)->kds, client, &info);
 
-out1:
 	/* If client still has no opened context at this point */
 	if (!cctx) {
 		if (cctx->xclbin_id)
@@ -248,6 +250,7 @@ out1:
 		(void) xocl_icap_unlock_bitstream(xdev, &args->xclbin_id, slot_id);
 	}
 out:
+	vfree(uuid);
 	mutex_unlock(&client->lock);
 	return ret;
 }
@@ -258,11 +261,17 @@ static int xocl_del_context(struct xocl_dev *xdev, struct kds_client *client,
 	struct kds_ctx_info	 info;
 	struct kds_client_ctx *cctx = NULL;
 	uint32_t slot_id = args->slot_idx; 
-	xuid_t *uuid;
+	xuid_t *uuid = NULL;
 	int ret = 0;
 
+        uuid = vmalloc(sizeof(uuid_t));
+        if (!uuid)
+                return -ENOMEM;
+
+        uuid_copy(uuid, &args->xclbin_id);
+
 	mutex_lock(&client->lock);
-        cctx = xocl_ctx_check(client, slot_id);
+        cctx = xocl_check_exists_context(client, uuid, slot_id);
 	if (!cctx) {
 		userpf_err(xdev, "No context was opened");
 		ret = -EINVAL;
@@ -287,6 +296,7 @@ static int xocl_del_context(struct xocl_dev *xdev, struct kds_client *client,
 	}
 
 out:
+	vfree(uuid);
 	mutex_unlock(&client->lock);
 	return ret;
 }
@@ -1040,6 +1050,8 @@ u32 xocl_kds_live_clients(struct xocl_dev *xdev, pid_t **plist)
 	return kds_live_clients(&XDEV(xdev)->kds, plist);
 }
 
+/* SAIF TODO : I believe, this code need to cleanup */
+#if 0
 static int xocl_kds_get_mem_idx(struct xocl_dev *xdev, int ip_index)
 {
 	struct connectivity *conn = NULL;
@@ -1156,6 +1168,7 @@ done:
 	XOCL_PUT_IP_LAYOUT(xdev);
 	return ret;
 }
+#endif
 
 static void xocl_cfg_notify(struct kds_command *xcmd, int status)
 {
@@ -1408,7 +1421,7 @@ xocl_kds_fill_cu_info(struct xocl_dev *xdev, int slot_hdl, struct ip_layout *ip_
 	 * - misc: software, number of resourse ...
 	 */
 	for (i = 0; i < num_cus; i++) {
-		krnl_info = xocl_query_kernel(xdev, cu_info[i].kname);
+		krnl_info = xocl_query_kernel(xdev, cu_info[i].kname, slot_hdl);
 		if (!krnl_info) {
 			userpf_info(xdev, "%s has no metadata. Ignore", cu_info[i].kname);
 			continue;
@@ -1468,7 +1481,7 @@ xocl_kds_fill_scu_info(struct xocl_dev *xdev, int slot_hdl, struct ip_layout *ip
 		cu_info[i].num_args = 0;
 		cu_info[i].args = NULL;
 
-		krnl_info = xocl_query_kernel(xdev, cu_info[i].kname);
+		krnl_info = xocl_query_kernel(xdev, cu_info[i].kname, slot_hdl);
 		if (!krnl_info) {
 			/* Workaround for U30, maybe we can remove this in the future */
 			userpf_info(xdev, "%s has no metadata. Use default", cu_info[i].kname);
@@ -2064,6 +2077,8 @@ out:
 	return ret;
 }
 
+/* SAIF TODO : I believe, this code need to cleanup */
+#if 0
 int xocl_kds_fa_init(struct xocl_dev *xdev)
 {
 	int ret = 0;
@@ -2079,6 +2094,7 @@ int xocl_kds_fa_init(struct xocl_dev *xdev)
 out:
 	return ret;
 }
+#endif
 
 /* The xocl_kds_update function should be called after xclbin is
  * downloaded. Do not use this function in other place.
@@ -2097,7 +2113,6 @@ int xocl_kds_update(struct xocl_dev *xdev, struct drm_xocl_kds cfg)
 	if (ret)
 		userpf_err(xdev, "KDS configure update failed, ret %d", ret);
 
-out:
 	return ret;
 }
 
@@ -2117,6 +2132,11 @@ int xocl_kds_register_cus(struct xocl_dev *xdev, int slot_hdl, xuid_t *uuid,
 			  struct ps_kernel_node *ps_kernel)
 {
 	int ret = 0;
+	struct xocl_xclbin_cache *xclbin_cache =
+	       	XDEV(xdev)->xclbin_cache[slot_hdl];
+
+	if (!xclbin_cache)
+		return -EINVAL;
 
 	XDEV(xdev)->kds.xgq_enable = false;
 	ret = xocl_ert_ctrl_connect(xdev);
@@ -2136,11 +2156,11 @@ int xocl_kds_register_cus(struct xocl_dev *xdev, int slot_hdl, xuid_t *uuid,
 			ret = -EINVAL;
 			goto out;
 		}
-		ret = xocl_kds_update_legacy(xdev, XDEV(xdev)->kds_cfg, ip_layout, ps_kernel);
+		ret = xocl_kds_update_legacy(xdev, xclbin_cache->kds_cfg, ip_layout, ps_kernel);
 		goto out;
 	}
 
-	ret = xocl_kds_update_xgq(xdev, slot_hdl, uuid, XDEV(xdev)->kds_cfg, ip_layout, ps_kernel);
+	ret = xocl_kds_update_xgq(xdev, slot_hdl, uuid, xclbin_cache->kds_cfg, ip_layout, ps_kernel);
 out:
 	return ret;
 }
@@ -2148,6 +2168,11 @@ out:
 void xocl_kds_unregister_cus(struct xocl_dev *xdev, int slot_hdl)
 {
 	int ret = 0;
+	struct xocl_xclbin_cache *xclbin_cache =
+	       	XDEV(xdev)->xclbin_cache[slot_hdl];
+
+	if (!xclbin_cache)
+		return;
 
 	XDEV(xdev)->kds.xgq_enable = false;
 	ret = xocl_ert_ctrl_connect(xdev);
@@ -2162,7 +2187,7 @@ void xocl_kds_unregister_cus(struct xocl_dev *xdev, int slot_hdl)
 
 	// Work-around to unconfigure PS kernel
 	// Will be removed once unconfigure command is there
-	ret = xocl_kds_xgq_cfg_start(xdev, XDEV(xdev)->kds_cfg, 0, 0);
+	ret = xocl_kds_xgq_cfg_start(xdev, xclbin_cache->kds_cfg, 0, 0);
 	ret = xocl_kds_xgq_cfg_end(xdev);
 	xocl_ert_ctrl_unset_xgq(xdev);
 	kds_reset(&XDEV(xdev)->kds);

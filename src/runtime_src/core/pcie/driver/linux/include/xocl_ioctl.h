@@ -514,6 +514,7 @@ enum drm_xocl_ctx_code {
  * @xclbin_id:	   UUID of the device image (xclbin)
  * @cu_index:	   Index of the compute unit in the device inage for which
  *                 the request is being made
+ * @slot_idx:	   Slot index where this xclbin is downloaded
  * @flags:	   Shared or exclusive context (XOCL_CTX_SHARED/XOCL_CTX_EXCLUSIVE)
  * @handle:	   Unused
  */
@@ -521,6 +522,7 @@ struct drm_xocl_ctx {
 	enum drm_xocl_ctx_code op;
 	xuid_t   xclbin_id;
 	uint32_t cu_index;
+	uint32_t slot_idx;
 	uint32_t flags;
 	// unused, in future it would return context id
 	uint32_t handle;
@@ -576,11 +578,8 @@ struct drm_xocl_pread_unmgd {
 
 
 struct drm_xocl_mm_stat {
-	unsigned int		slot_id;
-	unsigned int		mem_index;
 	size_t			memory_usage;
 	unsigned int		bo_count;
-	struct list_head	link;
 };
 
 /**
