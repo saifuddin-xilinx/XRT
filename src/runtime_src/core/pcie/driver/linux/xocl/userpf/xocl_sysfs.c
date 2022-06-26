@@ -704,20 +704,28 @@ static DEVICE_ATTR_RO(logic_uuids);
 static ssize_t ulp_uuids_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
+        struct xocl_xclbin_cache *x_cache = NULL;
 	struct xocl_dev *xdev = dev_get_drvdata(dev);
 	const void *uuid;
 	int node = -1, off = 0;
+        int i = 0;
 
-	if (!xdev->ulp_blob || fdt_check_header(xdev->ulp_blob))
-		return -EINVAL;
+	for (i = 0; i < MAX_SLOT_SUPPORT; i++) {
+		x_cache = XDEV(xdev)->xclbin_cache[i];
+		/* First free Index */
+		if (!x_cache)
+			continue;
 
-	for (node = xocl_fdt_get_next_prop_by_name(xdev, xdev->ulp_blob,
-		-1, PROP_INTERFACE_UUID, &uuid, NULL);
-	    uuid && node > 0;
-	    node = xocl_fdt_get_next_prop_by_name(xdev, xdev->ulp_blob,
-		node, PROP_INTERFACE_UUID, &uuid, NULL))
-		off += sprintf(buf + off, "%s\n", (char *)uuid);
+		if (!x_cache->ulp_blob || fdt_check_header(x_cache->ulp_blob))
+			return -EINVAL;
 
+		for (node = xocl_fdt_get_next_prop_by_name(xdev, x_cache->ulp_blob,
+					-1, PROP_INTERFACE_UUID, &uuid, NULL);
+				uuid && node > 0;
+				node = xocl_fdt_get_next_prop_by_name(xdev, x_cache->ulp_blob,
+					node, PROP_INTERFACE_UUID, &uuid, NULL))
+			off += sprintf(buf + off, "%s\n", (char *)uuid);
+	}
 	return off;
 }
 
