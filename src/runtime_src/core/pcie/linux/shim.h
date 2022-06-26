@@ -70,6 +70,7 @@ public:
   int xclGetBOProperties(unsigned int boHandle, xclBOProperties *properties);
 
   // Bitstream/bin download
+  int xclRegisterXclBin(const xclBin *buffer);
   int xclLoadXclBin(const xclBin *buffer);
   int xclGetErrorStatus(xclErrorStatus *info);
   int xclGetDeviceInfo2(xclDeviceInfo2 *info);
@@ -130,6 +131,9 @@ public:
   int xclExecWait(int timeoutMilliSec);
   int xclOpenContext(const uuid_t xclbinId, unsigned int ipIndex, bool shared) const;
   int xclCloseContext(const uuid_t xclbinId, unsigned int ipIndex);
+  int xclCreateHWContext(const uuid_t xclbinId, uint32_t qos, xcl_hwctx_handle *hwctx) const;
+  int xclDestroyHWContext(const uint32_t ctxHndl);
+  int xclOpenContextByName(const xrt::hw_context& hwctx, const std::string& cuname);
   int xclIPSetReadRange(uint32_t ipIndex, uint32_t start, uint32_t size);
 
   int getBoardNumber( void ) { return mBoardNumber; }
@@ -193,6 +197,7 @@ private:
   int dev_init();
   void dev_fini();
 
+  int xclPrepareAxlfDownload(const axlf *buffer, drm_xocl_axlf *axlf_obj);
   int xclLoadAxlf(const axlf *buffer);
   void xclSysfsGetDeviceInfo(xclDeviceInfo2 *info);
   void xclSysfsGetUsageInfo(drm_xocl_usage_stat& stat);

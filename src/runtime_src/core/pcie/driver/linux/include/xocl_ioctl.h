@@ -504,6 +504,8 @@ struct drm_xocl_pread_bo {
 enum drm_xocl_ctx_code {
 	XOCL_CTX_OP_ALLOC_CTX = 0,
 	XOCL_CTX_OP_FREE_CTX,
+	XOCL_CTX_OP_ALLOC_HW_CTX,
+	XOCL_CTX_OP_FREE_HW_CTX,
 	XOCL_CTX_OP_OPEN_UCU_FD,
 };
 
@@ -514,7 +516,8 @@ enum drm_xocl_ctx_code {
  * struct drm_xocl_ctx - Open or close a context on a compute unit on device
  * used with DRM_XOCL_CTX ioctl
  *
- * @op:            Alloc or free a context (XOCL_CTX_OP_ALLOC_CTX/XOCL_CTX_OP_FREE_CTX)
+ * @op:            Alloc or free a context (XOCL_CTX_OP_ALLOC_CTX/XOCL_CTX_OP_FREE_CTX/
+ * 			XOCL_CTX_OP_ALLOC_HW_CTX/XOCL_CTX_OP_FREE_HW_CTX)
  * @xclbin_id:	   UUID of the device image (xclbin)
  * @cu_index:	   Index of the compute unit in the device inage for which
  *                 the request is being made
@@ -526,8 +529,8 @@ struct drm_xocl_ctx {
 	xuid_t   xclbin_id;
 	uint32_t cu_index;
 	uint32_t flags;
-	// unused, in future it would return context id
-	uint32_t handle;
+	// it return context id
+	uint32_t  handle;
 };
 
 struct drm_xocl_info {

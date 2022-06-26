@@ -1328,6 +1328,28 @@ bool shim::zeroOutDDR()
 }
 
 /*
+ * xclRegisterXclBin()
+ */
+int
+shim::
+xclRegisterXclBin(const xclBin *buffer)
+{
+    drm_xocl_axlf axlf_obj = {const_cast<axlf *>(buffer), 0};
+
+    int ret = xclPrepareAxlfDownload(buffer, &axlf_obj);
+    if (!ret)
+            throw std::runtime_error("Invalid xclbin");
+
+    ret = mDev->ioctl(mUserHandle, DRM_IOCTL_XOCL_REGISTER_AXLF, &axlf_obj);
+    if (ret) {
+    	xrt_logmsg(XRT_ERROR, "See dmesg log for details. err = %d", ret);
+        return -errno;
+    }
+
+  return ret;
+}
+
+/*
  * xclLoadXclBin()
  */
 int
@@ -1394,24 +1416,23 @@ xclLoadXclBin(const xclBin *buffer)
 }
 
 /*
- * xclLoadAxlf()
+ * xclPrepareAxlfDownload()
  */
-int shim::xclLoadAxlf(const axlf *buffer)
+int shim::xclPrepareAxlfDownload(const axlf *buffer, drm_xocl_axlf *axlf_obj)
 {
     xrt_logmsg(XRT_INFO, "%s, buffer: %s", __func__, buffer);
-    drm_xocl_axlf axlf_obj = {const_cast<axlf *>(buffer), 0};
     unsigned int flags = XOCL_AXLF_BASE;
     int off = 0;
 
     auto force_program = xrt_core::config::get_force_program_xclbin(); //default value is false
     if(force_program) {
-        axlf_obj.flags = flags | XOCL_AXLF_FORCE_PROGRAM;
+        axlf_obj->flags = flags | XOCL_AXLF_FORCE_PROGRAM;
     }
 
     auto kernels = xrt_core::xclbin::get_kernels(buffer);
     /* Calculate size of kernels */
     for (auto& kernel : kernels) {
-        axlf_obj.ksize += sizeof(kernel_info) + sizeof(argument_info) * kernel.args.size();
+        axlf_obj->ksize += sizeof(kernel_info) + sizeof(argument_info) * kernel.args.size();
     }
 
     /* To enhance CU subdevice and KDS/ERT, driver needs all details about kernels
@@ -1445,10 +1466,10 @@ int shim::xclLoadAxlf(const axlf *buffer)
      * |   ...                 |
      * +-----------------------+
      */
-    std::vector<char> krnl_binary(axlf_obj.ksize);
-    axlf_obj.kernels = krnl_binary.data();
+    std::vector<char> krnl_binary(axlf_obj->ksize);
+    axlf_obj->kernels = krnl_binary.data();
     for (auto& kernel : kernels) {
-        auto krnl = reinterpret_cast<kernel_info *>(axlf_obj.kernels + off);
+        auto krnl = reinterpret_cast<kernel_info *>(axlf_obj->kernels + off);
         if (kernel.name.size() > sizeof(krnl->name))
             return -EINVAL;
         std::strncpy(krnl->name, kernel.name.c_str(), sizeof(krnl->name)-1);
@@ -1481,28 +1502,42 @@ int shim::xclLoadAxlf(const axlf *buffer)
     }
 
     /* To make download xclbin and configure KDS/ERT as an atomic operation. */
-    axlf_obj.kds_cfg.ert = xrt_core::config::get_ert();
-    axlf_obj.kds_cfg.polling = xrt_core::config::get_ert_polling();
-    axlf_obj.kds_cfg.cu_dma = xrt_core::config::get_ert_cudma();
-    axlf_obj.kds_cfg.cu_isr = xrt_core::config::get_ert_cuisr() && xrt_core::xclbin::get_cuisr(buffer);
-    axlf_obj.kds_cfg.cq_int = xrt_core::config::get_ert_cqint();
-    axlf_obj.kds_cfg.dataflow = xrt_core::config::get_feature_toggle("Runtime.dataflow") || xrt_core::xclbin::get_dataflow(buffer);
-    axlf_obj.kds_cfg.rw_shared = xrt_core::config::get_rw_shared();
+    axlf_obj->kds_cfg.ert = xrt_core::config::get_ert();
+    axlf_obj->kds_cfg.polling = xrt_core::config::get_ert_polling();
+    axlf_obj->kds_cfg.cu_dma = xrt_core::config::get_ert_cudma();
+    axlf_obj->kds_cfg.cu_isr = xrt_core::config::get_ert_cuisr() && xrt_core::xclbin::get_cuisr(buffer);
+    axlf_obj->kds_cfg.cq_int = xrt_core::config::get_ert_cqint();
+    axlf_obj->kds_cfg.dataflow = xrt_core::config::get_feature_toggle("Runtime.dataflow") || xrt_core::xclbin::get_dataflow(buffer);
+    axlf_obj->kds_cfg.rw_shared = xrt_core::config::get_rw_shared();
 
     /* TODO: In scheduler.cpp init() function, it use get_ert_slots(void) to get slot size.
      * But we cannot do this here, since the xclbin is not registered.
      * Currently, emulation flow use get_ert_slots() as well.
      * We will consider how to better determine slot size in new kds.
      */
-    //axlf_obj.kds_cfg.slot_size = mCoreDevice->get_ert_slots().second;
+    //axlf_obj->kds_cfg.slot_size = mCoreDevice->get_ert_slots().second;
     auto xml_hdr = xrt_core::xclbin::get_axlf_section(buffer, EMBEDDED_METADATA);
     if (!xml_hdr)
         throw std::runtime_error("No xml metadata in xclbin");
     auto xml_size = xml_hdr->m_sectionSize;
     auto xml_data = reinterpret_cast<const char*>(reinterpret_cast<const char*>(buffer) + xml_hdr->m_sectionOffset);
-    axlf_obj.kds_cfg.slot_size = mCoreDevice->get_ert_slots(xml_data, xml_size).second;
+    axlf_obj->kds_cfg.slot_size = mCoreDevice->get_ert_slots(xml_data, xml_size).second;
 
-    int ret = mDev->ioctl(mUserHandle, DRM_IOCTL_XOCL_READ_AXLF, &axlf_obj);
+    return 0;
+} 
+
+/*
+ * xclLoadAxlf()
+ */
+int shim::xclLoadAxlf(const axlf *buffer)
+{
+    drm_xocl_axlf axlf_obj = {const_cast<axlf *>(buffer), 0};
+
+    int ret = xclPrepareAxlfDownload(buffer, &axlf_obj);
+    if (!ret)
+            throw std::runtime_error("Invalid xclbin");
+
+    ret = mDev->ioctl(mUserHandle, DRM_IOCTL_XOCL_READ_AXLF, &axlf_obj);
     if (ret && errno == EAGAIN) {
         //special case for aws
         //if EAGAIN is seen, that means a pcie removal&rescan is ongoing, let's just
@@ -1784,6 +1819,22 @@ int shim::xclExecWait(int timeoutMilliSec)
     return mDev->poll(mUserHandle, POLLIN, timeoutMilliSec);
 }
 
+// open_context() - aka xclOpenContextByName
+int
+shim::
+xclOpenContextByName(const xrt::hw_context& hwctx, const std::string& cuname)
+{
+  // Alveo Linux PCIE does not yet support multiple xclbins.  Call
+  // regular flow.  Default access mode to shared unless explicitly
+  // exclusive.
+  auto shared = (hwctx.get_qos() != xrt::hw_context::qos::exclusive);
+  auto ctxhdl = static_cast<xcl_hwctx_handle>(hwctx);
+  auto cuidx = mCoreDevice->get_cuidx(ctxhdl, cuname);
+  xclOpenContext(hwctx.get_xclbin_uuid().get(), cuidx.index, shared);
+
+  return cuidx.index;
+}
+
 // xclOpenContext
 int
 shim::
@@ -1818,6 +1869,36 @@ int shim::xclCloseContext(const uuid_t xclbinId, unsigned int ipIndex)
     drm_xocl_ctx ctx = {XOCL_CTX_OP_FREE_CTX};
     std::memcpy(ctx.xclbin_id, xclbinId, sizeof(uuid_t));
     ctx.cu_index = ipIndex;
+    int ret = mDev->ioctl(mUserHandle, DRM_IOCTL_XOCL_CTX, &ctx);
+    return ret ? -errno : ret;
+}
+
+/*
+ * xclCreateHWContext
+ */
+int
+shim::xclCreateHWContext(const uuid_t xclbinId, uint32_t qos, xcl_hwctx_handle *hwctx) const
+{
+    drm_xocl_ctx ctx = {XOCL_CTX_OP_ALLOC_HW_CTX};
+    std::memcpy(ctx.xclbin_id, xclbinId, sizeof(uuid_t));
+    ctx.flags = qos;
+    int ret = mDev->ioctl(mUserHandle, DRM_IOCTL_XOCL_CTX, &ctx);
+    if (ret)
+      throw xrt_core::system_error(errno, "failed to open ip context");
+
+    *hwctx = static_cast<xcl_hwctx_handle>(ctx.handle);
+    //*hwctx = ctx.handle;
+    return ret;
+}
+
+/*
+ * xclDestroyHWContext
+ */
+int
+shim::xclDestroyHWContext(const uint32_t hwctx)
+{
+    drm_xocl_ctx ctx = {XOCL_CTX_OP_FREE_HW_CTX};
+    ctx.handle = hwctx;
     int ret = mDev->ioctl(mUserHandle, DRM_IOCTL_XOCL_CTX, &ctx);
     return ret ? -errno : ret;
 }
@@ -2329,6 +2410,27 @@ int xclLoadXclBin(xclDeviceHandle handle, const xclBin *buffer)
   });
 }
 
+int xclRegisterXclBin(xclDeviceHandle handle, const xclBin *buffer)
+{
+  return xdp::hal::profiling_wrapper("xclRegisterXclBin", [handle, buffer] {
+    try {
+      auto drv = xocl::shim::handleCheck(handle);
+      if (!drv)
+        return -EINVAL;
+
+      return drv->xclRegisterXclBin(buffer);
+    }
+    catch (const xrt_core::error& ex) {
+      xrt_core::send_exception_message(ex.what());
+      return ex.get_code();
+    }
+    catch (const std::exception& ex) {
+      xrt_core::send_exception_message(ex.what());
+      return -EINVAL;
+    }
+  });
+}
+
 int xclLogMsg(xclDeviceHandle, xrtLogMsgLevel level, const char* tag, const char* format, ...)
 {
     static auto verbosity = xrt_core::config::get_verbosity();
@@ -2674,6 +2776,47 @@ int xclCloseContext(xclDeviceHandle handle, const uuid_t xclbinId, unsigned ipIn
     xocl::shim *drv = xocl::shim::handleCheck(handle);
     return drv ? drv->xclCloseContext(xclbinId, ipIndex) : -ENODEV;
   });
+}
+
+int
+xclCreateHWContext(xclDeviceHandle handle, const uuid_t xclbinId, uint32_t qos, xcl_hwctx_handle *hwctx)
+{
+  return xdp::hal::profiling_wrapper("xclCreateHWContext",
+  [handle, xclbinId, qos, hwctx] {
+    try {
+      xocl::shim *drv = xocl::shim::handleCheck(handle);
+      return drv ? drv->xclCreateHWContext(xclbinId, qos, hwctx) : -ENODEV;
+    }
+    catch (const xrt_core::error& ex) {
+      xrt_core::send_exception_message(ex.what());
+      return ex.get_code();
+    }
+  }) ;
+}
+
+int xclDestroyHWContext(xclDeviceHandle handle, const uint32_t hwctx)
+{
+  return xdp::hal::profiling_wrapper("xclDestroyHWContext",
+  [handle, hwctx] {
+    xocl::shim *drv = xocl::shim::handleCheck(handle);
+    return drv ? drv->xclDestroyHWContext(hwctx) : -ENODEV;
+  });
+}
+
+int
+xclOpenContextByName(xclDeviceHandle handle, const xrt::hw_context& hwctx, const std::string& cuname)
+{
+  return xdp::hal::profiling_wrapper("xclOpenContext",
+  [handle, hwctx, cuname] {
+    try {
+      xocl::shim *drv = xocl::shim::handleCheck(handle);
+      return drv ? drv->xclOpenContextByName(hwctx, cuname) : -ENODEV;
+    }
+    catch (const xrt_core::error& ex) {
+      xrt_core::send_exception_message(ex.what());
+      return ex.get_code();
+    }
+  }) ;
 }
 
 const axlf_section_header* wrap_get_axlf_section(const axlf* top, axlf_section_kind kind)
