@@ -277,6 +277,67 @@ out:
 	return ret;
 }
 
+static int xocl_add_hw_context(struct xocl_dev *xdev, struct kds_client *client,
+			    struct drm_xocl_ctx *args)
+{
+	struct xocl_xclbin_cache *x_cache = NULL;
+	xuid_t *uuid = NULL;
+	uint32_t slot_hndl = 0;
+	int ret;
+
+	uuid = vzalloc(sizeof(*uuid));
+	if (!uuid) {
+		return -ENOMEM;
+	}
+	uuid_copy(uuid, &args->xclbin_id);
+	x_cache = xocl_query_cache_xclbin(xdev, uuid); 
+	if (!x_cache) {
+		vfree(uuid);
+		return -EINVAL;
+	}
+
+	mutex_lock(&client->lock);
+	ret = xocl_read_axlf_helper(XDEV(xdev)->drm, x_cache->idx, &slot_hndl);
+	if (!ret) {
+		vfree(uuid);
+		mutex_unlock(&client->lock);
+		return -EINVAL;
+	}
+
+	/* Slot handler should return from here. 
+	 * Same should use as hw context handler */
+	args->handle = slot_hndl;
+	mutex_unlock(&client->lock);
+	vfree(uuid);
+
+	return ret;
+}
+
+static int xocl_del_hw_context(struct xocl_dev *xdev, struct kds_client *client,
+			    struct drm_xocl_ctx *args)
+{
+	uint32_t slot_hndl;
+	int ret = 0;
+
+	mutex_lock(&client->lock);
+
+	/* xclCloseContext() would send xclbin_id and cu_idx.
+	 * Be more cautious while delete. Do sanity check */
+	if (client->ctx) {
+		userpf_err(xdev, "Already some contexts are still open");
+		ret = -EINVAL;
+		goto out;
+	}
+
+	slot_hndl = args->handle;
+	/* TODO : We need to make use this slot to clean the slot information
+	 * from the device */
+out:
+	mutex_unlock(&client->lock);
+	return ret;
+}
+
+
 static int
 xocl_open_ucu(struct xocl_dev *xdev, struct kds_client *client,
 	      struct drm_xocl_ctx *args)
@@ -313,6 +374,12 @@ static int xocl_context_ioctl(struct xocl_dev *xdev, void *data,
 		break;
 	case XOCL_CTX_OP_FREE_CTX:
 		ret = xocl_del_context(xdev, client, args);
+		break;
+	case XOCL_CTX_OP_ALLOC_HW_CTX:
+		ret = xocl_add_hw_context(xdev, client, args);
+		break;
+	case XOCL_CTX_OP_FREE_HW_CTX:
+		ret = xocl_del_hw_context(xdev, client, args);
 		break;
 	case XOCL_CTX_OP_OPEN_UCU_FD:
 		ret = xocl_open_ucu(xdev, client, args);

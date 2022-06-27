@@ -109,8 +109,8 @@ struct xocl_dev	{
 	ktime_t			mig_cache_expires;
 
 	u32			flags;
-	struct xocl_cma_bank  *cma_bank;
-	struct xocl_pci_info pci_stat;
+	struct xocl_cma_bank  	*cma_bank;
+	struct xocl_pci_info 	pci_stat;
 	atomic_t		dev_hotplug_done;
 };
 
@@ -194,7 +194,7 @@ void user_pci_reset_prepare(struct pci_dev *pdev);
 void user_pci_reset_done(struct pci_dev *pdev);
 #endif
 int xocl_unregister_axlf_by_index(struct xocl_dev *xdev, uint32_t idx);
-
+int xocl_read_axlf_helper(struct xocl_drm *drm_p, int cache_idx, uint32_t *slot_hndl);
 int xocl_refresh_subdevs(struct xocl_dev *xdev);
 
 u32 get_live_clients(struct xocl_dev *xdev, pid_t **pid_list);

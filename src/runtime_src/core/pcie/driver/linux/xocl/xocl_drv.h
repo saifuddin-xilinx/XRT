@@ -2073,6 +2073,25 @@ static inline void xocl_queue_destroy(xdev_handle_t xdev_hdl)
 }
 
 static inline struct xocl_xclbin_cache *
+xocl_query_cache_xclbin(xdev_handle_t xdev_hdl, xuid_t *xclbin)
+{
+	struct xocl_xclbin_cache *xclbin_cache = NULL;
+	int i = 0;
+
+	for (i = 0; i < MAX_SLOT_SUPPORT; i++) {
+		xclbin_cache = XDEV(xdev_hdl)->xclbin_cache[i];
+		if (!xclbin_cache)
+			continue;
+
+		if (xclbin && uuid_equal(xclbin, xclbin_cache->uuid)) {
+			return xclbin_cache;
+		}
+	}
+
+	return NULL;
+}
+
+static inline struct xocl_xclbin_cache *
 xocl_query_cache(xdev_handle_t xdev_hdl, const int slot_id)
 {
 	struct xocl_xclbin_cache *xclbin_cache = NULL;

@@ -342,8 +342,8 @@ static bool xocl_xclbin_in_use(struct xocl_dev *xdev)
 	return false;
 }
 
-static int
-xocl_read_axlf_helper(struct xocl_drm *drm_p, int cache_idx)
+int
+xocl_read_axlf_helper(struct xocl_drm *drm_p, int cache_idx, uint32_t *slot_hndl)
 {
 	long err = 0;
 	struct axlf *axlf = NULL;
@@ -487,8 +487,12 @@ done:
 	if (err) {
 		userpf_err(xdev, "Failed to download xclbin, err: %ld\n", err);
 	}
-	else
-		userpf_info(xdev, "Loaded xclbin %pUb", &axlf->m_header.uuid);
+	else {
+		// Default Slot 
+		*slot_hndl = 0;
+		userpf_info(xdev, "Loaded xclbin %pUb to Slot : %d", &axlf->m_header.uuid,
+				*slot_hndl);
+	}
 
 	return err;
 }
@@ -673,6 +677,7 @@ int xocl_read_axlf_ioctl(struct drm_device *dev,
 	struct xocl_drm *drm_p = dev->dev_private;
 	struct xocl_dev *xdev = drm_p->xdev;
 	int cache_idx = 0;
+	uint32_t slot_hndl = 0;
 	int err = 0;
 
 	cache_idx = xocl_register_axlf_ioctl(dev, data, filp);
@@ -682,7 +687,7 @@ int xocl_read_axlf_ioctl(struct drm_device *dev,
 	}
 
 	mutex_lock(&xdev->dev_lock);
-	err = xocl_read_axlf_helper(drm_p, cache_idx);
+	err = xocl_read_axlf_helper(drm_p, cache_idx, &slot_hndl);
 	mutex_unlock(&xdev->dev_lock);
 	return err;
 }
