@@ -170,11 +170,11 @@ int xocl_register_cus(xdev_handle_t xdev_hdl, int slot_hdl, xuid_t *uuid,
 	return xocl_kds_register_cus(xdev, slot_hdl, uuid, ip_layout, ps_kernel);
 }
 
-void xocl_unregister_cus(xdev_handle_t xdev_hdl, int slot_hdl)
+void xocl_unregister_cus(xdev_handle_t xdev_hdl, xuid_t *uuid, int slot_hdl)
 {
 	struct xocl_dev *xdev = container_of(XDEV(xdev_hdl), struct xocl_dev, core);
 
-	return xocl_kds_unregister_cus(xdev, slot_hdl);
+	return xocl_kds_unregister_cus(xdev, uuid, slot_hdl);
 }
 
 static int userpf_intr_config(xdev_handle_t xdev_hdl, u32 intr, bool en)

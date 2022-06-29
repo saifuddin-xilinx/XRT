@@ -1095,7 +1095,7 @@ _kds_fini_client(struct kds_sched *kds, struct kds_client *client,
 			info.curr_ctx = cctx;
 			kds_del_context(kds, client, &info);
 		}
-		kds_info(client,"Removing CU Domain[%d] CU Index [%d]",info.cu_domain,info.cu_idx);
+		kds_info(client,"Removing SCU Domain[%d] SCU Index [%d]",info.cu_domain,info.cu_idx);
 		count_idx += 1;
 	};
 	kds_client_set_cu_refs_zero(client, DOMAIN_PS);

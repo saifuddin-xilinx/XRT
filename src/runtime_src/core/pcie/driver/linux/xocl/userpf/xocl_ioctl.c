@@ -508,8 +508,14 @@ get_next_free_cache_index(struct xocl_dev *xdev, const xuid_t *uuid)
 	for (i = 0; i < MAX_SLOT_SUPPORT; i++) {
 		x_cache = XDEV(xdev)->xclbin_cache[i];
 		/* First free Index */
-		if (!x_cache)
+		if (!x_cache) {
+			x_cache = vzalloc(sizeof(struct xocl_xclbin_cache));
+			if (!x_cache)
+				return -ENOMEM;
+
+			x_cache->idx = i;
 			return x_cache->idx;
+		}
 			
 		/* Check if this uuid already exists */
 		if (uuid_equal(x_cache->uuid, uuid))

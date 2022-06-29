@@ -186,6 +186,7 @@ static int xocl_add_context(struct xocl_dev *xdev, struct kds_client *client,
 	xuid_t *uuid;
 	int ret;
 
+	printk("******* SAIF ********* (%s:%d)\n", __func__, __LINE__);
 	mutex_lock(&client->lock);
 	/* If this client has no opened context, lock bitstream */
 	if (!client->ctx) {
@@ -368,6 +369,7 @@ static int xocl_context_ioctl(struct xocl_dev *xdev, void *data,
 	struct kds_client *client = filp->driver_priv;
 	int ret = 0;
 
+	printk("******* SAIF ********* (%s:%d->op %d)\n", __func__, __LINE__, args->op);
 	switch(args->op) {
 	case XOCL_CTX_OP_ALLOC_CTX:
 		ret = xocl_add_context(xdev, client, args);
@@ -996,9 +998,11 @@ int xocl_client_ioctl(struct xocl_dev *xdev, int op, void *data,
 		/* Open/close context would lock/unlock bitstream.
 		 * This and download xclbin are mutually exclusive.
 		 */
+		printk("******* SAIF ********* (%s:%d)\n", __func__, __LINE__);
 		mutex_lock(&xdev->dev_lock);
 		ret = xocl_context_ioctl(xdev, data, filp);
 		mutex_unlock(&xdev->dev_lock);
+		printk("******* SAIF ********* (%s:%d)\n", __func__, __LINE__);
 		break;
 	case DRM_XOCL_EXECBUF:
 		ret = xocl_command_ioctl(xdev, data, filp, false);
@@ -2158,7 +2162,7 @@ int xocl_kds_register_cus(struct xocl_dev *xdev, int slot_hdl, xuid_t *uuid,
 		goto out;
 	}
 
-	x_cache = xocl_query_cache(xdev, slot_hdl);
+	x_cache = xocl_query_cache_xclbin(xdev, uuid);
 	if (!x_cache) {
 		ret = -EINVAL;
 		goto out;
@@ -2179,14 +2183,10 @@ out:
 	return ret;
 }
 
-void xocl_kds_unregister_cus(struct xocl_dev *xdev, int slot_hdl)
+void xocl_kds_unregister_cus(struct xocl_dev *xdev, xuid_t *uuid, int slot_hdl)
 {
 	int ret = 0;
 	struct xocl_xclbin_cache *x_cache = NULL;
-
-	x_cache = xocl_query_cache(xdev, slot_hdl);
-	if (!x_cache)
-		return;
 
 	/* Try config legacy ERT firmware */
 	XDEV(xdev)->kds.xgq_enable = false;
@@ -2198,6 +2198,10 @@ void xocl_kds_unregister_cus(struct xocl_dev *xdev, int slot_hdl)
 	}
 
 	if (!xocl_ert_ctrl_is_version(xdev, 1, 0))
+		return;
+
+	x_cache = xocl_query_cache_xclbin(xdev, uuid);
+	if (!x_cache)
 		return;
 
 	// Work-around to unconfigure PS kernel

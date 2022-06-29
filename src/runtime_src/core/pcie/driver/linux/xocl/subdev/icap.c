@@ -2295,7 +2295,7 @@ static int __icap_download_bitstream_user(struct platform_device *pdev,
 	int err = 0;
 
 	/* TODO: Use slot handle to unregister CUs. CU subdev will be destroyed */
-	xocl_unregister_cus(xdev, 0);
+	xocl_unregister_cus(xdev, &xclbin->m_header.uuid, 0);
 
 	xocl_subdev_destroy_by_level(xdev, XOCL_SUBDEV_LEVEL_URP);
 
