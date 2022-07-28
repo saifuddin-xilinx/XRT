@@ -17,6 +17,10 @@ file(GLOB XBMGMT_V2_BASE_FILES
   "../common/Process.cpp"
   "../common/Report*.cpp"
   "../common/PsKernelUtilities.cpp"
+<<<<<<< HEAD
+=======
+  "../common/Table2D.cpp"
+>>>>>>> VITIS-5838 Update report to reflect schema changes. Update kernel to match schema format. Add kernel to build edge structure.
 )
 
 # Collect local directory files
