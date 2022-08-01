@@ -157,6 +157,14 @@ int xocl_execbuf_ioctl(struct drm_device *dev, void *data,
 	struct drm_file *filp);
 int xocl_ctx_ioctl(struct drm_device *dev, void *data,
 	struct drm_file *filp);
+int xocl_create_hw_ctx_ioctl(struct drm_device *dev, void *data,
+	struct drm_file *filp);
+int xocl_destroy_hw_ctx_ioctl(struct drm_device *dev, void *data,
+	struct drm_file *filp);
+int xocl_open_cu_ctx_ioctl(struct drm_device *dev, void *data,
+	struct drm_file *filp);
+int xocl_close_cu_ctx_ioctl(struct drm_device *dev, void *data,
+	struct drm_file *filp);
 int xocl_user_intr_ioctl(struct drm_device *dev, void *data,
 	struct drm_file *filp);
 int xocl_read_axlf_ioctl(struct drm_device *dev, void *data,
@@ -222,6 +230,14 @@ void xocl_fini_sched(struct xocl_dev *xdev);
 int xocl_create_client(struct xocl_dev *xdev, void **priv);
 void xocl_destroy_client(struct xocl_dev *xdev, void **priv);
 int xocl_client_ioctl(struct xocl_dev *xdev, int op, void *data,
+		      struct drm_file *filp);
+int xocl_create_hw_context(struct xocl_dev *xdev, void *data,
+		      struct drm_file *filp);
+int xocl_destroy_hw_context(struct xocl_dev *xdev, void *data,
+		      struct drm_file *filp);
+int xocl_open_cu_context(struct xocl_dev *xdev, void *data,
+		      struct drm_file *filp);
+int xocl_close_cu_context(struct xocl_dev *xdev, void *data,
 		      struct drm_file *filp);
 int xocl_poll_client(struct file *filp, poll_table *wait, void *priv);
 int xocl_kds_stop(struct xocl_dev *xdev);

@@ -28,11 +28,12 @@
 /* Multiple CU context can be active under a single KDS client Context.
  */
 struct kds_client_cu_ctx {
-	struct kds_client_ctx		*ctx;
 	u32				cu_idx;
 	u32		  		cu_domain;
 	u32				flags;
 	u32				ref_cnt;
+	struct kds_client_ctx		*ctx;
+	struct kds_client_hw_ctx	*hw_ctx;
 	struct list_head		link;
 };
 
@@ -50,10 +51,23 @@ struct kds_client_ctx {
 	/* To support multiple context for multislot case */
 	struct list_head		link;
 	void				*xclbin_id;
-	u32				slot_idx;
 	/* To support multiple CU context */
 	struct list_head		cu_ctx_list;
 };
+
+/* Multiple xclbin context can be active under a single client.
+ * Client should maintain all the active XCLBIN.
+ */
+struct kds_client_hw_ctx {
+	uint32_t 			hw_ctx_idx;
+	void				*xclbin_id;
+	u32				slot_idx;
+	/* To support multiple context for multislot case */
+	struct list_head		link;
+	/* To support multiple CU context */
+	struct list_head		cu_ctx_list;
+};
+
 
 struct kds_client_cu_refcnt {
 	struct mutex	          lock;
@@ -81,36 +95,39 @@ struct kds_client_cu_refcnt {
  * @event: Events to notify user client
  */
 struct kds_client {
-	struct list_head	  link;
-	struct device	         *dev;
-	struct pid	         *pid;
-	struct mutex		  lock;
+	struct list_head		link;
+	struct device			*dev;
+	struct pid	         	*pid;
+	struct mutex		  	lock;
 
 	/* TODO: xocl not suppot multiple xclbin context yet. */
-	struct kds_client_ctx    *ctx;
-	struct list_head          ctx_list;
+	struct kds_client_hw_ctx    	*ctx;
 
-	struct list_head          graph_list;
-	spinlock_t                graph_list_lock;
-	u32                       aie_ctx;
-	struct kds_client_cu_refcnt  *refcnt;
+	/* To suppot multiple hw context */
+	struct list_head          	hw_ctx_list;
+	uint32_t 		 	next_avail_hw_ctx;
+
+	struct list_head          	graph_list;
+	spinlock_t                	graph_list_lock;
+	u32                       	aie_ctx;
+	struct kds_client_cu_refcnt  	*refcnt;
 
 	/* Per client statistics. Use percpu variable for two reasons
 	 * 1. no lock is need while modifying these counters
 	 * 2. do not need to worry about cache false share
 	 */
-	struct client_stats __percpu *stats;
+	struct client_stats __percpu 	*stats;
 
-	struct list_head	  ev_entry;
-	int			  ev_type;
+	struct list_head	  	ev_entry;
+	int			  	ev_type;
 
 	/*
 	 * Below are modified when the other thread is completing commands.
 	 * In order to prevent false sharing, they need to be in different
 	 * cache lines.
 	 */
-	wait_queue_head_t	  waitq ____cacheline_aligned_in_smp;
-	atomic_t		  event;
+	wait_queue_head_t	  	waitq ____cacheline_aligned_in_smp;
+	atomic_t		  	event;
 };
 
 /* Macros to operates client statistics */
