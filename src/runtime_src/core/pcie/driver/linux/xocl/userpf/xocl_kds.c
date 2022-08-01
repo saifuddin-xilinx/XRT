@@ -168,26 +168,16 @@ sk_ecmd2xcmd(struct xocl_dev *xdev, struct ert_packet *ecmd,
 	return 0;
 }
 
-static int
-xocl_initialize_cu_ctx(struct kds_client *client, struct drm_xocl_ctx *args,
-	       	struct kds_client_cu_ctx *cu_ctx)
+static inline void
+xocl_ctx_to_info(struct drm_xocl_ctx *args, struct kds_client_cu_info *cu_info)
 {
-        uint32_t cu_domain = get_domain(args->cu_index);
-        uint32_t cu_idx = get_domain_idx(args->cu_index);
+        cu_info->cu_domain = get_domain(args->cu_index);
+        cu_info->cu_idx = get_domain_idx(args->cu_index);
 
-	if (!cu_ctx)
-		return -EINVAL;
-
-        cu_ctx->ctx = client->ctx;
-        cu_ctx->cu_domain = cu_domain;
-        cu_ctx->cu_idx = cu_idx;
-        cu_ctx->ref_cnt = 0;
         if (args->flags == XOCL_CTX_EXCLUSIVE)
-                cu_ctx->flags = CU_CTX_EXCLUSIVE;
+                cu_info->flags = CU_CTX_EXCLUSIVE;
         else
-                cu_ctx->flags = CU_CTX_SHARED;
-
-	return 0;
+                cu_info->flags = CU_CTX_SHARED;
 }
 
 static int xocl_add_context(struct xocl_dev *xdev, struct kds_client *client,
@@ -195,6 +185,7 @@ static int xocl_add_context(struct xocl_dev *xdev, struct kds_client *client,
 {
 	xuid_t *uuid;
 	struct kds_client_cu_ctx *cu_ctx = NULL;
+	struct kds_client_cu_info cu_info = { 0 };
 	int ret;
 
 	mutex_lock(&client->lock);
@@ -227,14 +218,13 @@ static int xocl_add_context(struct xocl_dev *xdev, struct kds_client *client,
 	/* Bitstream is locked. No one could load a new one
 	 * until this client close all of the contexts.
 	 */
+	xocl_ctx_to_info(args, &cu_info);
 	/* Get a free CU context for the given CU index */
-	cu_ctx = kds_alloc_cu_ctx(client, client->ctx, args->cu_index);
+	cu_ctx = kds_alloc_cu_ctx(client, client->ctx, &cu_info);
 	if (!cu_ctx) {
 		ret = -EINVAL;
 		goto out1;
 	}
-	/* Initialize this cu context with required iniformation */
-	xocl_initialize_cu_ctx(client, args, cu_ctx);
 	 
 	ret = kds_add_context(&XDEV(xdev)->kds, client, cu_ctx);
 	if (ret)
@@ -256,6 +246,7 @@ static int xocl_del_context(struct xocl_dev *xdev, struct kds_client *client,
 			    struct drm_xocl_ctx *args)
 {
 	struct kds_client_cu_ctx *cu_ctx = NULL;
+	struct kds_client_cu_info cu_info = { 0 };
 	xuid_t *uuid;
 	int ret = 0;
 
@@ -277,7 +268,8 @@ static int xocl_del_context(struct xocl_dev *xdev, struct kds_client *client,
 		goto out;
 	}
 
-	cu_ctx = kds_get_cu_ctx(client, client->ctx, args->cu_index);
+	xocl_ctx_to_info(args, &cu_info);
+	cu_ctx = kds_get_cu_ctx(client, client->ctx, &cu_info);
         if (!cu_ctx) {
 		userpf_err(xdev, "No CU context is open");
 		ret = -EINVAL;
@@ -353,6 +345,123 @@ static int xocl_context_ioctl(struct xocl_dev *xdev, void *data,
 	}
 
 	return ret;
+}
+
+int xocl_create_hw_context(struct xocl_dev *xdev, struct drm_file *filp,
+		uint32_t slot_id, uint32_t *hw_ctx_id)
+{
+	struct kds_client *client = filp->driver_priv;
+	struct kds_client_hw_ctx *hw_ctx = NULL;
+	uuid_t *xclbin_id = NULL;
+	int ret = 0;
+
+	if (!client)
+		return -EINVAL;
+
+	ret = XOCL_GET_XCLBIN_ID(xdev, xclbin_id);
+	if (ret)
+		return ret;
+
+	mutex_lock(&client->lock);
+
+	hw_ctx = kds_alloc_hw_ctx(client, xclbin_id, slot_id);
+	if (!hw_ctx) {
+		ret = -EINVAL;
+		goto error_out;
+	}
+
+	/* Lock the bitstream */
+	ret = xocl_icap_lock_bitstream(xdev, xclbin_id);
+	if (ret) {
+		kds_free_hw_ctx(client, hw_ctx);
+		ret = -EINVAL;
+		goto error_out;
+	}
+	
+	*hw_ctx_id = hw_ctx->hw_ctx_idx;
+
+error_out:
+	mutex_unlock(&client->lock);
+	XOCL_PUT_XCLBIN_ID(xdev);
+	return ret;
+}
+
+int xocl_destroy_hw_context(struct xocl_dev *xdev, struct drm_file *filp,
+		uint32_t hw_ctx_id)
+{
+        struct kds_client_hw_ctx *hw_ctx = NULL;
+	struct kds_client *client = filp->driver_priv;
+        int ret = 0;
+
+        mutex_lock(&client->lock);
+
+	/* Try to find the existing HW context */
+        hw_ctx = kds_get_hw_ctx_by_id(client, hw_ctx_id);
+        if (!hw_ctx) {
+                userpf_err(xdev, "No valid HW context is open");
+        	mutex_unlock(&client->lock);
+                return -EINVAL;
+        }
+
+	/* Unlock the bitstream for this HW context if no reference is there */
+	(void)xocl_icap_unlock_bitstream(xdev, hw_ctx->xclbin_id);
+
+	ret = kds_free_hw_ctx(client, hw_ctx);
+        	
+	mutex_unlock(&client->lock);
+
+        return ret;
+}
+
+int xocl_open_cu_context(struct xocl_dev *xdev, struct drm_file *filp,
+		uint32_t hw_ctx_id)
+{
+	struct kds_client *client = filp->driver_priv;
+	struct kds_client_hw_ctx *hw_ctx = NULL;
+	struct kds_client_cu_ctx *cu_ctx = NULL;
+
+        /* Bitstream is locked. No one could load a new one
+         * until this client close all of the contexts.
+         */
+        mutex_lock(&client->lock);
+
+	/* Try to find the corresponding HW context */
+        hw_ctx = kds_get_hw_ctx_by_id(client, hw_ctx_id);
+        if (!hw_ctx) {
+                userpf_err(xdev, "No valid HW context is open");
+        	mutex_unlock(&client->lock);
+                return -EINVAL;
+        }
+
+        /* Get a free CU context for the given CU index */
+        cu_ctx = kds_alloc_cu_ctx(client, hw_ctx, args->cu_index);
+        if (!cu_ctx) {
+                ret = -EINVAL;
+                goto out1;
+        }
+        /* Initialize this cu context with required iniformation */
+        xocl_initialize_cu_ctx(client, args, cu_ctx);
+
+        ret = kds_add_context(&XDEV(xdev)->kds, client, cu_ctx);
+        if (ret)
+                kds_free_cu_ctx(client, cu_ctx);
+out1:
+        /* If client still has no opened context at this point */
+        if (!client->ctx) {
+                if (client->ctx->xclbin_id)
+                        vfree(client->ctx->xclbin_id);
+                client->ctx->xclbin_id = NULL;
+                (void) xocl_icap_unlock_bitstream(xdev, &args->xclbin_id);
+        }
+out:
+        mutex_unlock(&client->lock);
+        return ret;
+}
+
+int xocl_close_cu_context(struct xocl_dev *xdev, void *data,
+		      struct drm_file *filp)
+{
+	return 0;
 }
 
 /**
@@ -905,8 +1014,10 @@ int xocl_create_client(struct xocl_dev *xdev, void **priv)
 		goto out;
 	}
 
-        /* Initializing context list */
+        /* Initializing legacy context list */
         INIT_LIST_HEAD(&client->ctx_list);
+		/* Initializing hw context list */
+        INIT_LIST_HEAD(&client->hw_ctx_list);
 
 	*priv = client;
 
