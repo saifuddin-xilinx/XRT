@@ -30,6 +30,10 @@
 xuid_t uuid_null = NULL_UUID_LE;
 #endif
 
+static int
+xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr,
+	       uint32_t qos, uint32_t *slot_id);
+
 int xocl_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 {
 	struct drm_xocl_info *obj = data;
@@ -106,10 +110,9 @@ int xocl_create_hw_ctx_ioctl(struct drm_device *dev, void *data,
         struct xocl_dev *xdev = drm_p->xdev;
         struct drm_xocl_axlf *axlf_obj_ptr = NULL;
 	uint32_t slot_id = 0;
-	uint32_t hw_ctx_id = 0;
         int ret = 0;
 
-	axlf_obj_ptr = drm_hw_ctx->axlf_obj;
+	axlf_obj_ptr = drm_hw_ctx->axlf_ptr;
 	if (!axlf_obj_ptr)
 		return -EINVAL;
 
@@ -120,18 +123,11 @@ int xocl_create_hw_ctx_ioctl(struct drm_device *dev, void *data,
 		mutex_unlock(&xdev->dev_lock);
 		return ret;
 	}
-
 	mutex_unlock(&xdev->dev_lock);
+	
 	/* Create the HW Context and lock the bitstream */
 	/* Slot id is 0 for now */
-	ret = xocl_create_hw_context(xdev, filp, slot_id, &hw_ctx_id);
-	if (ret)
-		return ret;
-
-	/* Return the hw context index from here */
-	drm_hw_ctx->hw_context = hw_ctx_id;
-
-	return 0;
+	return xocl_create_hw_context(xdev, filp, drm_hw_ctx, slot_id);
 }
 
 /*
@@ -148,7 +144,7 @@ int xocl_destroy_hw_ctx_ioctl(struct drm_device *dev, void *data,
 	if (!drm_hw_ctx)
 		return -EINVAL;
 
-	return xocl_destroy_hw_context(xdev, filp, drm_hw_ctx->hw_context);
+	return xocl_destroy_hw_context(xdev, filp, drm_hw_ctx);
 }
 
 /*
@@ -158,7 +154,15 @@ int xocl_destroy_hw_ctx_ioctl(struct drm_device *dev, void *data,
 int xocl_open_cu_ctx_ioctl(struct drm_device *dev, void *data,
         struct drm_file *filp)
 {
-	return 0;
+	struct drm_xocl_open_cu_ctx *drm_cu_ctx =
+		(struct drm_xocl_open_cu_ctx *)data;
+	struct xocl_drm *drm_p = dev->dev_private;
+	struct xocl_dev *xdev = drm_p->xdev;
+
+	if (!drm_cu_ctx)
+		return -EINVAL;
+
+	return xocl_open_cu_context(xdev, filp, drm_cu_ctx);
 }
 
 /*
@@ -167,7 +171,15 @@ int xocl_open_cu_ctx_ioctl(struct drm_device *dev, void *data,
 int xocl_close_cu_ctx_ioctl(struct drm_device *dev, void *data,
         struct drm_file *filp)
 {
-	return 0;
+	struct drm_xocl_close_cu_ctx *drm_cu_ctx =
+		(struct drm_xocl_close_cu_ctx *)data;
+	struct xocl_drm *drm_p = dev->dev_private;
+	struct xocl_dev *xdev = drm_p->xdev;
+
+	if (!drm_cu_ctx)
+		return -EINVAL;
+
+	return xocl_close_cu_context(xdev, filp, drm_cu_ctx);
 }
 
 int xocl_user_intr_ioctl(struct drm_device *dev, void *data,
@@ -650,10 +662,11 @@ int xocl_read_axlf_ioctl(struct drm_device *dev,
 	struct drm_xocl_axlf *axlf_obj_ptr = data;
 	struct xocl_drm *drm_p = dev->dev_private;
 	struct xocl_dev *xdev = drm_p->xdev;
+	uint32_t slot_id = 0;
 	int err = 0;
 
 	mutex_lock(&xdev->dev_lock);
-	err = xocl_read_axlf_helper(drm_p, axlf_obj_ptr, 0); // QOS legacy
+	err = xocl_read_axlf_helper(drm_p, axlf_obj_ptr, 0, &slot_id); // QOS legacy
 	mutex_unlock(&xdev->dev_lock);
 	return err;
 }

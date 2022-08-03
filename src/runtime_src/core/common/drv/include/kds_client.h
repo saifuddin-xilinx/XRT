@@ -42,14 +42,13 @@ struct kds_client_cu_info {
 	u32				cu_idx;
 	u32		  		cu_domain;
 	u32				flags;
+	void 				*ctx;
 };
 
 /* Multiple xclbin context can be active under a single client.
  * Client should maintain all the active XCLBIN.
  */
 struct kds_client_ctx {
-	/* To support multiple context for multislot case */
-	struct list_head		link;
 	void				*xclbin_id;
 	/* To support multiple CU context */
 	struct list_head		cu_ctx_list;
@@ -67,7 +66,6 @@ struct kds_client_hw_ctx {
 	/* To support multiple CU context */
 	struct list_head		cu_ctx_list;
 };
-
 
 struct kds_client_cu_refcnt {
 	struct mutex	          lock;
@@ -101,7 +99,7 @@ struct kds_client {
 	struct mutex		  	lock;
 
 	/* TODO: xocl not suppot multiple xclbin context yet. */
-	struct kds_client_hw_ctx    	*ctx;
+	struct kds_client_ctx    	*ctx;
 
 	/* To suppot multiple hw context */
 	struct list_head          	hw_ctx_list;
