@@ -60,12 +60,23 @@ struct kds_client_ctx {
 struct kds_client_hw_ctx {
 	uint32_t 			hw_ctx_idx;
 	void				*xclbin_id;
+	/* To support multiple CU context */
+	struct list_head		cu_ctx_list;
+};
+
+/* Multiple xclbin context can be active under a single client.
+ * Client should maintain all the active XCLBIN.
+ */
+struct kds_client_hw_ctx {
+	uint32_t 			hw_ctx_idx;
+	void				*xclbin_id;
 	u32				slot_idx;
 	/* To support multiple context for multislot case */
 	struct list_head		link;
 	/* To support multiple CU context */
 	struct list_head		cu_ctx_list;
 };
+
 
 struct kds_client_cu_refcnt {
 	struct mutex	          lock;
