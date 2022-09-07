@@ -941,7 +941,7 @@ void xclmgmt_mailbox_srv(void *arg, void *data, size_t len,
 		} else {
 			memcpy(buf, xclbin, xclbin_len);
 
-			ret = xocl_xclbin_download(lro, buf);
+			ret = xocl_xclbin_download(lro, buf, DEFAULT_SLOT);
 
 			vfree(buf);
 		}
@@ -981,7 +981,7 @@ void xclmgmt_mailbox_srv(void *arg, void *data, size_t len,
 		} else {
 			memcpy(buf, xclbin, xclbin_len);
 
-			ret = xocl_xclbin_download(lro, buf);
+			ret = xocl_xclbin_download(lro, buf, slot_id);
 
 			vfree(buf);
 		}
@@ -1015,7 +1015,7 @@ void xclmgmt_mailbox_srv(void *arg, void *data, size_t len,
 		if (fetch)
 			ret = xclmgmt_xclbin_fetch_and_download(lro, xclbin);
 		else
-			ret = xocl_xclbin_download(lro, xclbin);
+			ret = xocl_xclbin_download(lro, xclbin, DEFAULT_SLOT);
 
 		(void) xocl_peer_response(lro, req->req, msgid, &ret,
 			sizeof(ret));
@@ -1055,7 +1055,7 @@ void xclmgmt_mailbox_srv(void *arg, void *data, size_t len,
 		if (fetch)
 			ret = xclmgmt_xclbin_fetch_and_download(lro, xclbin);
 		else
-			ret = xocl_xclbin_download(lro, xclbin);
+			ret = xocl_xclbin_download(lro, xclbin, slot_id);
 
 		(void) xocl_peer_response(lro, req->req, msgid, &ret,
 			sizeof(ret));
