@@ -186,24 +186,25 @@ static int get_slot_id(struct xocl_dev *xdev, const uuid_t *id, uint32_t *slot_i
         int i = 0;
         int ret = -EINVAL;
 
-        /* First check whether uuid exists or not */
-        for (i = 0; i < MAX_SLOT_SUPPORT; i++) {
+	/* First check whether uuid exists or not */
+	for (i = 0; i < MAX_SLOT_SUPPORT; i++) {
 		ret = XOCL_GET_XCLBIN_ID(xdev, xclbin_id, i);
-                if (ret) {
-                        ret = -EINVAL;
-                        goto done;
-                }
-                if (!xclbin_id)
-                        continue;
+		if (ret) {
+			ret = -EINVAL;
+			goto done;
+		}
+		if (!xclbin_id)
+			continue;
 
-                if (uuid_equal(id, xclbin_id)) {
-                        *slot_id = i;
-                        ret = 0;
-                        XOCL_PUT_XCLBIN_ID(xdev, i);
-                        break;
-                }
-                XOCL_PUT_XCLBIN_ID(xdev, i);
-        }
+		if (uuid_equal(id, xclbin_id)) {
+			*slot_id = i;
+			ret = 0;
+			XOCL_PUT_XCLBIN_ID(xdev, i);
+			break;
+		}
+		XOCL_PUT_XCLBIN_ID(xdev, i);
+		xclbin_id = NULL;
+	}
 
 done:
         return ret;
@@ -228,7 +229,7 @@ static int xocl_add_context(struct xocl_dev *xdev, struct kds_client *client,
 			goto out;
 		}
 
-		ret = get_slot_id(xdev, uuid, &slot_id);
+		ret = get_slot_id(xdev, &args->xclbin_id, &slot_id);
                 if (ret) {
                         userpf_err(xdev, "No slot matched for this xclbin");
 			vfree(client->ctx);

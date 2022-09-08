@@ -620,13 +620,14 @@ void *xocl_drm_init(xdev_handle_t xdev_hdl)
 	xocl_drvinst_set_filedev(drm_p, ddev);
 	xocl_drvinst_set_offline(drm_p, false);
 
+#if 0
 	/* Initialize the memory manager  */
 	ret = xocl_init_memory_manager(drm_p);
 	if (ret) {
 		xocl_xdev_err(xdev_hdl, "Memory Initialize failed 0x%x", ret);
 		goto failed;
 	}
-
+#endif
 	return drm_p;
 
 failed:
@@ -1004,7 +1005,7 @@ static int xocl_init_memory_manager(struct xocl_drm *drm_p)
 	}
 
 	/* SAIF TODO : Fix this for actualy memory manager */
-	err = XOCL_GET_MEM_TOPOLOGY(drm_p->xdev, topo, 0);
+	err = XOCL_GET_MEM_TOPOLOGY(drm_p->xdev, topo, DEFAULT_PL_SLOT);
 	if (err) {
 		mutex_unlock(&drm_p->mm_lock);
 		return err;
@@ -1103,13 +1104,13 @@ static int xocl_init_memory_manager(struct xocl_drm *drm_p)
         drm_p->xocl_mm = xocl_mm;
         drm_p->xocl_mem_topo = topo;
 	
-	XOCL_PUT_MEM_TOPOLOGY(drm_p->xdev, 0);
+	XOCL_PUT_MEM_TOPOLOGY(drm_p->xdev, DEFAULT_PL_SLOT);
         mutex_unlock(&drm_p->mm_lock);
 
 	return 0;
 
 error:
-	XOCL_PUT_MEM_TOPOLOGY(drm_p->xdev, 0);
+	XOCL_PUT_MEM_TOPOLOGY(drm_p->xdev, DEFAULT_PL_SLOT);
 	mutex_unlock(&drm_p->mm_lock);
 
 	if (err)
@@ -1135,6 +1136,13 @@ int xocl_init_mem(struct xocl_drm *drm_p, uint32_t slot_id)
 		/* TODO: This is still hardcoding.. */
 		reserved1 = 0x80000000;
 		reserved2 = 0x1000000;
+	}
+	
+	/* Initialize the memory manager  */
+	err = xocl_init_memory_manager(drm_p);
+	if (err) {
+		xocl_xdev_err(drm_p->ddev->dev, "Memory Initialize failed 0x%x", err);
+		return err;
 	}
 
 	mutex_lock(&drm_p->mm_lock);

@@ -208,7 +208,7 @@ static long xclmgmt_hot_reset_post(struct xclmgmt_dev *lro, bool force)
 
 	/* For legacy case always download to slot 0 */
 	if (lro->preload_xclbin)
-		xocl_xclbin_download(lro, lro->preload_xclbin, 0);
+		xocl_xclbin_download(lro, lro->preload_xclbin, DEFAULT_PL_SLOT);
 	if (xrt_reset_syncup)
 		xocl_set_master_on(lro);
 	else if (!force)

@@ -435,24 +435,29 @@ static bool xocl_xclbin_in_use(struct xocl_dev *xdev)
 
 /* SAIF TODO : Move this to a new file and implement this resolver */
 static int
-xocl_resolver(struct xocl_dev *xdev, xuid_t *xclbin_id, uint32_t qos)
+xocl_resolver(struct xocl_dev *xdev, xuid_t *xclbin_id, uint32_t qos,
+		uint32_t *slot_id)
 {
 	bool force_download = false;
-	uint32_t slot_id = 0;
+	uint32_t s_id = DEFAULT_PL_SLOT;
+	int ret = 0;
 	//
-	if (xclbin_downloaded(xdev, xclbin_id, slot_id)) {
+	if (xclbin_downloaded(xdev, xclbin_id, s_id)) {
 		if (qos & XOCL_AXLF_FORCE_PROGRAM) {
 			// We come here if user sets force_xclbin_program
 			// option "true" in xrt.ini under [Runtime] section
 			DRM_WARN("%s Force xclbin download", __func__);
 			force_download = true;
 		} else {
+			*slot_id = s_id;
+			ret = -EEXIST;
 			goto done;
 		}
 	}
 
+	*slot_id = s_id;
 done:
-	return slot_id;
+	return ret;
 }
 
 static int
@@ -496,13 +501,15 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr,
 
 	/* TODO : qos need to define */
 	qos |= axlf_ptr->flags;
- 	rc = xocl_resolver(xdev, &bin_obj.m_header.uuid, qos);
-	if (rc < 0) {
+ 	rc = xocl_resolver(xdev, &bin_obj.m_header.uuid, qos, &slot_id);
+	if (rc) {
+		if (rc == -EEXIST)
+			goto done; 
+
 		userpf_err(xdev, "Download xclbin failed\n");
 		return -EINVAL;
 	}
 
-	slot_id = rc;
 
 	/*
 	 * 1. We locked &xdev->dev_lock so no new contexts can be opened
@@ -565,6 +572,8 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr,
 		goto done;
 	}
 
+	XDEV(xdev)->axlf_obj[slot_id] = axlf_obj;
+	axlf_obj->idx = slot_id;
 	axlf_obj->flags = axlf_ptr->flags;
 	dtbHeader = xocl_axlf_section_header(xdev, axlf,
 		PARTITION_METADATA);
@@ -676,24 +685,22 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr,
 		}
 	}
 
-	axlf_obj->idx = slot_id;
-	XDEV(xdev)->axlf_obj[slot_id] = axlf_obj;
+done:
 	/* Update the slot */
 	*slot = slot_id;
-done:
 	if (size < 0)
 		err = size;
 	if (err) {
-		if (axlf_obj->kernels)
-			vfree(axlf_obj->kernels);
+		if (axlf_obj) {
+			if (axlf_obj->kernels)
+				vfree(axlf_obj->kernels);
 
-		if (axlf_obj->ulp_blob)
-			vfree(axlf_obj->ulp_blob);
+			if (axlf_obj->ulp_blob)
+				vfree(axlf_obj->ulp_blob);
 
-		if (axlf_obj)
 			vfree(axlf_obj);
-
-		XDEV(xdev)->axlf_obj[slot_id] = NULL;
+			XDEV(xdev)->axlf_obj[slot_id] = NULL;
+		}
 
 		userpf_err(xdev, "Failed to download xclbin, err: %ld\n", err);
 	}

@@ -947,7 +947,7 @@ void xclmgmt_mailbox_srv(void *arg, void *data, size_t len,
 			memcpy(buf, xclbin, xclbin_len);
 
 			/* For legacy case always download to slot 0 */
-			ret = xocl_xclbin_download(lro, buf, 0);
+			ret = xocl_xclbin_download(lro, buf, DEFAULT_PL_SLOT);
 
 			vfree(buf);
 		}
@@ -1022,7 +1022,7 @@ void xclmgmt_mailbox_srv(void *arg, void *data, size_t len,
 			ret = xclmgmt_xclbin_fetch_and_download(lro, xclbin);
 		else
 			/* For legacy case always download to slot 0 */
-			ret = xocl_xclbin_download(lro, xclbin, 0);
+			ret = xocl_xclbin_download(lro, xclbin, DEFAULT_PL_SLOT);
 
 		(void) xocl_peer_response(lro, req->req, msgid, &ret,
 			sizeof(ret));
