@@ -24,6 +24,8 @@ struct xclbin_arg {
 	struct axlf 		*xclbin;
 	struct xocl_subdev 	*urpdevs;
 	int 			num_dev;
+	bool			is_slot_enable;
+	uint32_t 		slot_idx;
 };
 
 static int versal_xclbin_pre_download(xdev_handle_t xdev, void *args)
@@ -136,7 +138,11 @@ static int xgq_xclbin_download(xdev_handle_t xdev, void *args)
 	struct xclbin_arg *arg = (struct xclbin_arg *)args;
 	int ret;
 
-	ret = xocl_xgq_download_axlf(xdev, arg->xclbin);
+	if (arg->is_slot_enable)
+		ret = xocl_xgq_download_axlf_slot(xdev, arg->xclbin,
+				arg->slot_idx);
+	else
+		ret = xocl_xgq_download_axlf(xdev, arg->xclbin);
 
 	return ret;
 }
@@ -213,6 +219,7 @@ static int xocl_xclbin_download_impl(xdev_handle_t xdev, const void *xclbin,
 		.xdev = xdev,
 		.xclbin = (struct axlf *)xclbin,
 		.num_dev = 0,
+		.is_slot_enable = false,
 	};
 	int ret = 0;
 
@@ -240,6 +247,62 @@ static int xocl_xclbin_download_impl(xdev_handle_t xdev, const void *xclbin,
 done:
 	return ret;
 }
+
+static int xocl_slot_xclbin_download_impl(xdev_handle_t xdev, const void *xclbin,
+	uint32_t slot_id, struct xocl_xclbin_ops *ops)
+{
+	/* args are simular, thus using the same pattern among all ops*/
+	struct xclbin_arg args = {
+		.xdev = xdev,
+		.xclbin = (struct axlf *)xclbin,
+		.num_dev = 0,
+		.is_slot_enable = true,
+		.slot_idx = slot_id,
+	};
+	int ret = 0;
+
+	/* Step1: call pre download callback */
+	if (ops->xclbin_pre_download) {
+		ret = ops->xclbin_pre_download(xdev, &args);
+		if (ret)
+			goto done;
+	}
+
+	/* Step2: there must be a download callback */
+	if (!ops->xclbin_download) {
+		ret = -EINVAL;
+		goto done;
+	}
+	ret = ops->xclbin_download(xdev, &args);
+	if (ret)
+		goto done;
+
+	/* Step3: call post download callback */
+	if (ops->xclbin_post_download) {
+		ret = ops->xclbin_post_download(xdev, &args);
+	}
+
+done:
+	return ret;
+}
+
+
+int xocl_slot_xclbin_download(xdev_handle_t xdev, const void *xclbin,
+		uint32_t slot_id)
+{
+	int rval = 0;
+
+	/* SAIF TODO : What should be the check here to
+	 * make sure device support multiple slot.
+	 */
+	if (XOCL_DSA_IS_VERSAL(xdev)) {
+		rval = xocl_slot_xclbin_download_impl(xdev, xclbin, slot_id,
+			       &xgq_ops);
+	}
+
+	return rval;
+}
+
 
 int xocl_xclbin_download(xdev_handle_t xdev, const void *xclbin)
 {

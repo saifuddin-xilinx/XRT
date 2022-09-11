@@ -82,6 +82,7 @@ enum xgq_cmd_opcode {
 	/* Management command type */
 	XGQ_CMD_OP_LOAD_XCLBIN		= 0x0,
 	XGQ_CMD_OP_CONFIGURE		= 0x1,
+	XGQ_CMD_OP_LOAD_XCLBIN_SLOT	= 0x2,
 
 	XGQ_CMD_OP_GET_LOG_PAGE		= 0x8,
 

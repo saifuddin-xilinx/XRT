@@ -106,6 +106,11 @@ typedef void (*xocl_vmr_complete_cb)(void *arg, struct xgq_com_queue_entry *ccmd
 
 struct xocl_xgq_vmr;
 
+struct xocl_xgq_xclbin_param {
+	struct axlf             *p_xclbin;
+	uint32_t 		slot_idx;
+};
+
 struct xocl_xgq_vmr_cmd {
 	struct xgq_cmd_sq	xgq_cmd_entry;
 	struct list_head	xgq_cmd_list;
@@ -752,12 +757,14 @@ static ssize_t xgq_transfer_data(struct xocl_xgq_vmr *xgq, const void *buf,
 	struct xocl_xgq_vmr_cmd *cmd = NULL;
 	struct xgq_cmd_data_payload *payload = NULL;
 	struct xgq_cmd_sq_hdr *hdr = NULL;
+	uint32_t slot_id = 0;
 	ssize_t ret = 0;
 	u32 address = 0;
 	u32 length = 0;
 	int id = 0;
 
 	if (opcode != XGQ_CMD_OP_LOAD_XCLBIN && 
+	    opcode != XGQ_CMD_OP_LOAD_XCLBIN_SLOT &&
 	    opcode != XGQ_CMD_OP_DOWNLOAD_PDI &&
 	    opcode != XGQ_CMD_OP_LOAD_APUBIN &&
 	    opcode != XGQ_CMD_OP_PROGRAM_SCFW) {
@@ -787,11 +794,26 @@ static ssize_t xgq_transfer_data(struct xocl_xgq_vmr *xgq, const void *buf,
 			len, length);
 		goto cid_alloc_failed;
 	}
-	/* set up payload */
-	payload = (opcode == XGQ_CMD_OP_LOAD_XCLBIN) ?
-		&(cmd->xgq_cmd_entry.pdi_payload) :
-		&(cmd->xgq_cmd_entry.xclbin_payload);
 
+	/* set up payload */
+	if (opcode == XGQ_CMD_OP_LOAD_XCLBIN_SLOT) {
+		struct xocl_xgq_xclbin_param *p_args =
+			(struct xocl_xgq_xclbin_param *)buf;
+		
+		payload = &(cmd->xgq_cmd_entry.xclbin_payload);
+		slot_id = p_args->slot_idx;
+		buf = p_args->p_xclbin;
+		/* APU doesn't aware about this new opcode. Hence,
+		 * pass the existing opcode to APU.
+		 */
+		opcode = XGQ_CMD_OP_LOAD_XCLBIN;
+	}
+	else if (opcode == XGQ_CMD_OP_LOAD_XCLBIN) {
+		payload = &(cmd->xgq_cmd_entry.xclbin_payload);
+	} else {
+		payload = &(cmd->xgq_cmd_entry.pdi_payload);
+	}
+	
 	/*
 	 * copy buf data onto shared memory with device.
 	 * Note: if len == 0, it is PROGRAME_SCFW, no payload to copyin
@@ -802,6 +824,7 @@ static ssize_t xgq_transfer_data(struct xocl_xgq_vmr *xgq, const void *buf,
 	payload->size = len;
 	payload->addr_type = XGQ_CMD_ADD_TYPE_AP_OFFSET;
 	payload->flash_type = get_flash_type(xgq);
+	payload->rsvd1 = slot_id;
 
 	/* set up hdr */
 	hdr = &(cmd->xgq_cmd_entry.hdr);
@@ -854,6 +877,24 @@ acquire_failed:
 	kfree(cmd);
 
 	return ret;
+}
+
+static int xgq_load_xclbin_slot(struct platform_device *pdev,
+	const void *u_xclbin, uint32_t slot_id)
+{
+	struct xocl_xgq_vmr *xgq = platform_get_drvdata(pdev);
+	struct axlf *xclbin = (struct axlf *)u_xclbin;
+	u64 xclbin_len = xclbin->m_header.m_length;
+	int ret = 0;
+        struct xocl_xgq_xclbin_param u_args = {
+                .p_xclbin = (struct axlf *)u_xclbin,
+		.slot_idx = slot_id, 
+        };
+	
+	ret = xgq_transfer_data(xgq, &u_args, xclbin_len,
+		XGQ_CMD_OP_LOAD_XCLBIN_SLOT, XOCL_XGQ_DOWNLOAD_TIME);
+
+	return ret == xclbin_len ? 0 : -EIO;
 }
 
 static int xgq_load_xclbin(struct platform_device *pdev,
@@ -2660,6 +2701,7 @@ attach_failed:
 
 static struct xocl_xgq_vmr_funcs xgq_vmr_ops = {
 	.xgq_load_xclbin = xgq_load_xclbin,
+	.xgq_load_xclbin_slot = xgq_load_xclbin_slot,
 	.xgq_check_firewall = xgq_check_firewall,
 	.xgq_clear_firewall = xgq_clear_firewall,
 	.xgq_freq_scaling = xgq_freq_scaling,

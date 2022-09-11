@@ -891,11 +891,12 @@ out:
  * @return      0 on success, Error code on failure.
  */
 int
-zocl_xclbin_load_pskernel(struct drm_zocl_dev *zdev, void *data)
+zocl_xclbin_load_pskernel(struct drm_zocl_dev *zdev, void *data,
+		uint32_t slot_id)
 {
         struct axlf *axlf = (struct axlf *)data;
         struct axlf *axlf_head = axlf;
-	struct drm_zocl_slot *slot;
+	struct drm_zocl_slot *slot = NULL;
         char *xclbin = NULL;
         size_t size_of_header = 0;
         size_t num_of_sections = 0;
@@ -910,8 +911,11 @@ zocl_xclbin_load_pskernel(struct drm_zocl_dev *zdev, void *data)
                 return -EINVAL;
         }
 
-	// Currently only 1 slot - TODO: Support multi-slot in the future
-	slot = zdev->pr_slot[0];
+	slot = zdev->pr_slot[slot_id];
+	if (!slot) {
+                DRM_INFO("Invalid slot specified");
+                return -EINVAL;
+	}
 
         mutex_lock(&slot->slot_xclbin_lock);
 	/* Check unique ID */
