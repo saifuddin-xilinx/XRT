@@ -620,6 +620,8 @@ void *xocl_drm_init(xdev_handle_t xdev_hdl)
 	xocl_drvinst_set_filedev(drm_p, ddev);
 	xocl_drvinst_set_offline(drm_p, false);
 
+	/* SAIF HACK for Test */
+#if 0
         ret = xocl_init_drm_memory_manager(drm_p);
 	if (ret) {
 		xocl_xdev_err(xdev_hdl, "Init DRM Memory manager failed 0x%x", ret);
@@ -632,6 +634,7 @@ void *xocl_drm_init(xdev_handle_t xdev_hdl)
 	 * based on XCLBIN. We have done phase 1 here.
 	 */
         drm_p->xocl_mm_done = false;
+#endif
 
 	return drm_p;
 
@@ -678,12 +681,14 @@ void xocl_mm_update_usage_stat(struct xocl_drm *drm_p, u32 ddr,
 	u64 size, int count)
 {
 	struct xocl_mm *xocl_mm = drm_p->xocl_mm;
+	struct drm_xocl_mm_stat *mm_usage_stat = 
+		xocl_mm->mm_usage_stat[ddr];
 
-	BUG_ON(!xocl_mm && !xocl_mm->mm_usage_stat[ddr]);
+	BUG_ON(!xocl_mm && !mm_usage_stat);
 
-	xocl_mm->mm_usage_stat[ddr]->memory_usage +=
+	mm_usage_stat->memory_usage +=
 		(count > 0) ? size : -size;
-	xocl_mm->mm_usage_stat[ddr]->bo_count += count;
+	mm_usage_stat->bo_count += count;
 }
 
 static int xocl_mm_insert_node_range_all(struct xocl_drm *drm_p, uint32_t *mem_id,
@@ -701,7 +706,7 @@ static int xocl_mm_insert_node_range_all(struct xocl_drm *drm_p, uint32_t *mem_i
 	for (i = 0; i < grp_topology->m_count; i++) {
 		mem_data = &grp_topology->m_mem_data[i];
 		if ((convert_mem_tag(mem_data->m_tag) == MEM_TAG_HOST) ||
-				!XOCL_IS_PS_KERNEL_MEM(grp_topology, i))
+				XOCL_IS_PS_KERNEL_MEM(grp_topology, i))
 			continue;
 
 		start_addr = mem_data->m_base_address;
@@ -747,10 +752,11 @@ static int xocl_mm_insert_node_range(struct xocl_drm *drm_p, u32 mem_id,
 	return ret;
 }
 
-int xocl_mm_insert_node(struct xocl_drm *drm_p, unsigned memidx,
+int xocl_mm_insert_node(struct xocl_drm *drm_p, unsigned *mem_idx,
 			uint32_t slotidx, struct drm_mm_node *node, u64 size)
 {
 	int ret = 0;
+	unsigned memidx = *mem_idx;
 	struct xocl_mem_stat *curr_mem = NULL;
 	struct mem_topology *grp_topology = NULL;
 	
@@ -786,6 +792,7 @@ int xocl_mm_insert_node(struct xocl_drm *drm_p, unsigned memidx,
 		}
 	}
 
+	*mem_idx = memidx;
         return ret;
 }
 
@@ -1159,6 +1166,9 @@ static int xocl_init_memory_manager(struct xocl_drm *drm_p)
 		mutex_unlock(&drm_p->mm_lock);
 		return err;
 	}
+
+	if (!topo)
+		goto error;
 
 	/* Initialize with max and min possible value */
         mm_start_addr = 0xffffFFFFffffFFFF;

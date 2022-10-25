@@ -408,6 +408,9 @@ int xocl_get_slot_id_by_hw_ctx_id(struct xocl_dev *xdev,
         struct kds_client_hw_ctx *hw_ctx = NULL;
         struct kds_client *client = filp->driver_priv;
 
+		if (xdev->is_legacy_ctx)
+			return DEFAULT_PL_SLOT;
+
         mutex_lock(&client->lock);
         hw_ctx = kds_get_hw_ctx_by_id(client, hw_ctx_id);
         if (!hw_ctx) {
@@ -1788,6 +1791,7 @@ xocl_kds_fill_scu_info(struct xocl_dev *xdev, int slot_hdl, struct ip_layout *ip
 		cu_info[i].num_res = 0;
 		cu_info[i].num_args = 0;
 		cu_info[i].args = NULL;
+		cu_info[i].slot_idx = slot_hdl;
 
 		krnl_info = xocl_query_kernel(xdev, cu_info[i].kname, slot_hdl);
 		if (!krnl_info) {

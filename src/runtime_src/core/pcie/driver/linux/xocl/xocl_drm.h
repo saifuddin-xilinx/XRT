@@ -127,7 +127,7 @@ void xocl_mm_get_usage_stat(struct xocl_drm *drm_p, u32 ddr,
 void xocl_mm_update_usage_stat(struct xocl_drm *drm_p, u32 ddr,
         u64 size, int count);
 
-int xocl_mm_insert_node(struct xocl_drm *drm_p, unsigned memidx,
+int xocl_mm_insert_node(struct xocl_drm *drm_p, unsigned *memidx,
                 uint32_t slotidx, struct drm_mm_node *node, u64 size);
 
 void *xocl_drm_init(xdev_handle_t xdev);

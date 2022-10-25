@@ -123,6 +123,7 @@ int xocl_create_hw_ctx_ioctl(struct drm_device *dev, void *data,
 		return ret;
 	}
 	mutex_unlock(&xdev->dev_lock);
+	xdev->is_legacy_ctx = false;
 	
 	/* Create the HW Context and lock the bitstream */
 	/* Slot id is 0 for now */
@@ -442,28 +443,41 @@ static bool xocl_xclbin_in_use(struct xocl_dev *xdev)
 
 /* SAIF TODO : Move this to a new file and implement this resolver */
 static int
-xocl_resolver(struct xocl_dev *xdev, xuid_t *xclbin_id, uint32_t qos,
-		uint32_t *slot_id)
+xocl_resolver(struct xocl_dev *xdev, struct axlf *axlf, xuid_t *xclbin_id,
+		 uint32_t qos,	uint32_t *slot_id)
 {
 	bool force_download = false;
 	uint32_t s_id = DEFAULT_PL_SLOT;
 	int ret = 0;
 	//
-	if (xclbin_downloaded(xdev, xclbin_id, s_id)) {
-		if (qos & XOCL_AXLF_FORCE_PROGRAM) {
-			// We come here if user sets force_xclbin_program
-			// option "true" in xrt.ini under [Runtime] section
-			DRM_WARN("%s Force xclbin download", __func__);
-			force_download = true;
-		} else {
-			*slot_id = s_id;
-			ret = -EEXIST;
-			goto done;
+	if (!xocl_axlf_section_header(xdev, axlf, SOFT_KERNEL)) {
+	    s_id = DEFAULT_PL_SLOT;
+		printk("**************** %s %d This is a PL XCLBIN ********\n", __func__, __LINE__);
+		if (xclbin_downloaded(xdev, xclbin_id, s_id)) {
+			if (qos & XOCL_AXLF_FORCE_PROGRAM) {
+				// We come here if user sets force_xclbin_program
+				// option "true" in xrt.ini under [Runtime] section
+				DRM_WARN("%s Force xclbin download", __func__);
+				force_download = true;
+			} else {
+				*slot_id = s_id;
+				ret = -EEXIST;
+				goto done;
+			}
 		}
 	}
+	else {
+		static int ps_slot_id = 0;
+		printk("**************** %s %d This is a PS XCLBIN ********\n", __func__, __LINE__);
+		if (++ps_slot_id == DEFAULT_PL_SLOT)
+			++ps_slot_id;
+	
+		s_id = ps_slot_id;
+	}	
 
 	*slot_id = s_id;
 done:
+	userpf_info(xdev, "Loading xclbin %pUb to slot %d", xclbin_id, *slot_id);
 	return ret;
 }
 
@@ -506,29 +520,6 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr,
 		goto done;
 	}
 
-	/* TODO : qos need to define */
-	qos |= axlf_ptr->flags;
- 	rc = xocl_resolver(xdev, &bin_obj.m_header.uuid, qos, &slot_id);
-	if (rc) {
-		if (rc == -EEXIST)
-			goto done; 
-
-		userpf_err(xdev, "Download xclbin failed\n");
-		return -EINVAL;
-	}
-
-	/*
-	 * 1. We locked &xdev->dev_lock so no new contexts can be opened
-	 *    and no contexts can be closed
-	 * 2. A opened context would lock bitstream and hold it. Directly
-	 *    ask icap if bitstream is locked
-	 */
-	if (xocl_icap_bitstream_is_locked(xdev, slot_id)) {
-		err = -EBUSY;
-		goto done;
-	}
-	/* All contexts are closed. No outstanding commands */
-
 	/* Really need to download, sanity check xclbin, first. */
 	if (xocl_xrt_version_check(xdev, &bin_obj, true)) {
 		userpf_err(xdev, "Xclbin isn't supported by current XRT\n");
@@ -555,6 +546,30 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr,
 		err = -EFAULT;
 		goto done;
 	}
+
+	/* TODO : qos need to define */
+	qos |= axlf_ptr->flags;
+ 	rc = xocl_resolver(xdev, axlf, &bin_obj.m_header.uuid, qos, &slot_id);
+	if (rc) {
+		if (rc == -EEXIST)
+			goto done; 
+
+		userpf_err(xdev, "Download xclbin failed\n");
+		return -EINVAL;
+	}
+
+	/*
+	 * 1. We locked &xdev->dev_lock so no new contexts can be opened
+	 *    and no contexts can be closed
+	 * 2. A opened context would lock bitstream and hold it. Directly
+	 *    ask icap if bitstream is locked
+	 */
+	if (xocl_icap_bitstream_is_locked(xdev, slot_id)) {
+		err = -EBUSY;
+		goto done;
+	}
+	/* All contexts are closed. No outstanding commands */
+
 
 	axlf_obj = XDEV(xdev)->axlf_obj[slot_id];
 	if (axlf_obj != NULL) {
@@ -665,6 +680,9 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr,
 
 	memcpy(&axlf_obj->kds_cfg, &axlf_ptr->kds_cfg, sizeof(axlf_ptr->kds_cfg));
 
+	/* SAIF HACK */
+	axlf->m_header.m_debug_bin[0] = slot_id;
+
 	err = xocl_icap_download_axlf(xdev, axlf, slot_id);
 	/*
 	 * Don't just bail out here, always recreate drm mem
@@ -729,6 +747,7 @@ int xocl_read_axlf_ioctl(struct drm_device *dev,
 
 	mutex_lock(&xdev->dev_lock);
 	err = xocl_read_axlf_helper(drm_p, axlf_obj_ptr, 0, &slot_id); // QOS legacy
+	xdev->is_legacy_ctx = true;
 	mutex_unlock(&xdev->dev_lock);
 	return err;
 }

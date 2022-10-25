@@ -457,7 +457,7 @@ static struct drm_xocl_bo *xocl_create_bo(struct drm_device *dev,
 	xocl_xdev_dbg(xdev, "alloc bo from bank%u, flag %x, host bank %d",
 		memidx, xobj->flags, drm_p->cma_bank_idx);
 
-	err = xocl_mm_insert_node(drm_p, memidx, slotidx, xobj->mm_node,
+	err = xocl_mm_insert_node(drm_p, &memidx, slotidx, xobj->mm_node,
 		xobj->base.size);
 	if (err)
 		goto failed;
@@ -713,7 +713,7 @@ int xocl_userptr_bo_ioctl(
 	 * Driver has to map that hw context to the corresponding slot id.
 	 */
 	hw_ctx_id = xocl_bo_slot_idx(user_flags);
-	ret = xocl_get_slot_id_by_hw_ctx_id(drm_p->xdev, filp, user_flags);
+	ret = xocl_get_slot_id_by_hw_ctx_id(drm_p->xdev, filp, hw_ctx_id);
 	if (ret < 0)
 		return ret;
 
