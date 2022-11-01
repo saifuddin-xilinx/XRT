@@ -278,9 +278,9 @@ static inline int check_bo_user_reqs(const struct drm_device *dev,
 	struct xocl_drm *drm_p = dev->dev_private;
 	struct xocl_dev *xdev = drm_p->xdev;
 	u16 ddr_count;
-	unsigned ddr;
 	struct mem_topology *topo = NULL;
 	int err = 0;
+	unsigned ddr = xocl_bo_ddr_idx(flags);
 	uint32_t slot_id = xocl_bo_slot_idx(flags);
 
 	if (type == XOCL_BO_EXECBUF || type == XOCL_BO_IMPORT ||
@@ -288,20 +288,17 @@ static inline int check_bo_user_reqs(const struct drm_device *dev,
 		return 0;
 	//From "mem_topology" or "feature rom" depending on
 	//unified or non-unified dsa
-	ddr_count = XOCL_DDR_COUNT(xdev);
-
-	if (ddr_count == 0)
-		return -EINVAL;
-
-	ddr = xocl_bo_ddr_idx(flags);
-	if (ddr >= ddr_count)
-		return -EINVAL;
 	
 	err = XOCL_GET_GROUP_TOPOLOGY(xdev, topo, slot_id);
 	if (err)
 		return err;
+    
+    if (topo) {
+        if (XOCL_IS_PS_KERNEL_MEM(topo, ddr)) {
+			err = 0;
+			goto done;
+        }
 
-	if (topo) {
 		if (XOCL_IS_STREAM(topo, ddr)) {
 			userpf_err(xdev, "Bank %d is Stream", ddr);
 			err = -EINVAL;
@@ -314,6 +311,14 @@ static inline int check_bo_user_reqs(const struct drm_device *dev,
 			goto done;
 		}
 	}
+
+    ddr_count = XOCL_DDR_COUNT(xdev);
+	if (ddr_count == 0)
+		return -EINVAL;
+
+	if (ddr >= ddr_count)
+		return -EINVAL;
+	
 done:
 	XOCL_PUT_GROUP_TOPOLOGY(xdev, slot_id);
 	return err;
@@ -724,7 +729,7 @@ int xocl_userptr_bo_ioctl(
 	BO_ENTER("xobj %p", xobj);
 
 	if (IS_ERR(xobj)) {
-		DRM_ERROR("object creation failed user_flags %d, size 0x%llx\n", user_flags, args->size);
+		DRM_ERROR("object creation failed user_flags %x, size 0x%llx\n", user_flags, args->size);
 		return PTR_ERR(xobj);
 	}
 

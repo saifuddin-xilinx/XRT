@@ -336,6 +336,36 @@ u32 get_live_clients(struct xocl_dev *xdev, pid_t **plist)
 	return c;
 }
 
+static bool ps_xclbin_downloaded(struct xocl_dev *xdev, xuid_t *xclbin_id, uint32_t *slot_id)
+{
+	bool ret = false;
+	int err = 0;
+    int i = 0;
+	xuid_t *downloaded_xclbin =  NULL;
+	bool changed = false;
+
+    for (i = 0; i < MAX_SLOT_SUPPORT; i++) {
+        if (i == DEFAULT_PL_SLOT)
+            continue; 
+
+        err = XOCL_GET_XCLBIN_ID(xdev, downloaded_xclbin, i);
+        if (err)
+            return ret;
+
+        if (downloaded_xclbin && uuid_equal(downloaded_xclbin, xclbin_id)) {
+            ret = true;
+            *slot_id = i;
+            userpf_info(xdev, "xclbin is already downloaded to slot %d\n", i);
+            break;
+        }
+
+        XOCL_PUT_XCLBIN_ID(xdev, i);
+    }
+
+	return ret;
+}
+
+
 static bool xclbin_downloaded(struct xocl_dev *xdev, xuid_t *xclbin_id,
 		uint32_t slot_id)
 {
@@ -468,11 +498,24 @@ xocl_resolver(struct xocl_dev *xdev, struct axlf *axlf, xuid_t *xclbin_id,
 	}
 	else {
 		static int ps_slot_id = 0;
-		printk("**************** %s %d This is a PS XCLBIN ********\n", __func__, __LINE__);
-		if (++ps_slot_id == DEFAULT_PL_SLOT)
-			++ps_slot_id;
-	
-		s_id = ps_slot_id;
+        uint32_t existing_slot_id = 0;
+		
+		if (ps_xclbin_downloaded(xdev, xclbin_id, &existing_slot_id)) {
+			if (qos & XOCL_AXLF_FORCE_PROGRAM) {
+                s_id = existing_slot_id; 
+				DRM_WARN("%s Force xclbin download to slot %d", __func__, s_id);
+			} else {
+				*slot_id = existing_slot_id;
+				ret = -EEXIST;
+				goto done;
+            }
+        }
+        else {
+            if (++ps_slot_id == DEFAULT_PL_SLOT)
+                ++ps_slot_id;
+
+            s_id = ps_slot_id;
+        }
 	}	
 
 	*slot_id = s_id;
@@ -689,7 +732,7 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr,
 	 * since we have cleaned it up before download.
 	 */
 
-	if (!preserve_mem) {
+	if (!err && !preserve_mem) {
 		rc = xocl_init_mem(drm_p, slot_id);
 		if (err == 0)
 			err = rc;

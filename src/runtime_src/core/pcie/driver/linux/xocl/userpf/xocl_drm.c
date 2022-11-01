@@ -620,8 +620,6 @@ void *xocl_drm_init(xdev_handle_t xdev_hdl)
 	xocl_drvinst_set_filedev(drm_p, ddev);
 	xocl_drvinst_set_offline(drm_p, false);
 
-	/* SAIF HACK for Test */
-#if 0
         ret = xocl_init_drm_memory_manager(drm_p);
 	if (ret) {
 		xocl_xdev_err(xdev_hdl, "Init DRM Memory manager failed 0x%x", ret);
@@ -634,7 +632,6 @@ void *xocl_drm_init(xdev_handle_t xdev_hdl)
 	 * based on XCLBIN. We have done phase 1 here.
 	 */
         drm_p->xocl_mm_done = false;
-#endif
 
 	return drm_p;
 
