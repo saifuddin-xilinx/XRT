@@ -904,6 +904,7 @@ zocl_xclbin_load_pskernel(struct drm_zocl_dev *zdev, void *data)
 	void *aie_res = 0;
 	struct device_node *aienode = NULL;
 	uint8_t hw_gen = 1;
+	uint32_t slot_id = 0;
 
         if (memcmp(axlf_head->m_magic, "xclbin2", 8)) {
                 DRM_INFO("Invalid xclbin magic string");
@@ -912,17 +913,19 @@ zocl_xclbin_load_pskernel(struct drm_zocl_dev *zdev, void *data)
 
 	BUG_ON(!zdev);
 	// Currently only 1 slot - TODO: Support multi-slot in the future
-	slot = zdev->pr_slot[0];
+	slot_id = axlf->m_header.m_debug_bin[0];
+	printk ("************************************************** Incoming Slot %d\n", slot_id);
+	slot = zdev->pr_slot[slot_id];
 
         mutex_lock(&slot->slot_xclbin_lock);
 	/* Check unique ID */
-	if (zocl_xclbin_same_uuid(slot, &axlf_head->m_header.uuid)) {
+	if ((slot->slot_type == DOMAIN_PL) &&
+	    (zocl_xclbin_same_uuid(slot, &axlf_head->m_header.uuid))) {
 		DRM_INFO("%s The XCLBIN already loaded, uuid: %pUb",
 			 __func__, &axlf_head->m_header.uuid);
 		mutex_unlock(&slot->slot_xclbin_lock);
 		return ret;
 	}
-
 
 	/* Get full axlf header */
 	size_of_header = sizeof(struct axlf_section_header);
