@@ -2179,7 +2179,7 @@ struct xocl_xgq_vmr_funcs {
 	int (*xgq_load_xclbin)(struct platform_device *pdev,
 		const void __user *arg);
 	int (*xgq_load_xclbin_slot)(struct platform_device *pdev,
-		const void __user *arg, uint64_t slot);
+		const void __user *arg, uint32_t slot);
 	int (*xgq_check_firewall)(struct platform_device *pdev);
 	int (*xgq_clear_firewall)(struct platform_device *pdev);
 	int (*xgq_freq_scaling)(struct platform_device *pdev,
@@ -2209,6 +2209,9 @@ struct xocl_xgq_vmr_funcs {
 #define	xocl_xgq_download_axlf(xdev, xclbin)			\
 	(XGQ_CB(xdev, xgq_load_xclbin) ?			\
 	XGQ_OPS(xdev)->xgq_load_xclbin(XGQ_DEV(xdev), xclbin) : -ENODEV)
+#define	xocl_xgq_download_axlf_slot(xdev, xclbin, slot)			\
+	(XGQ_CB(xdev, xgq_load_xclbin_slot) ?			\
+	XGQ_OPS(xdev)->xgq_load_xclbin_slot(XGQ_DEV(xdev), xclbin, slot) : -ENODEV)
 #define	xocl_xgq_check_firewall(xdev)				\
 	(XGQ_CB(xdev, xgq_check_firewall) ?			\
 	XGQ_OPS(xdev)->xgq_check_firewall(XGQ_DEV(xdev)) : 0)

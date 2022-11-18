@@ -891,7 +891,7 @@ out:
  * @return      0 on success, Error code on failure.
  */
 int
-zocl_xclbin_load_pskernel(struct drm_zocl_dev *zdev, void *data)
+zocl_xclbin_load_pskernel(struct drm_zocl_dev *zdev, void *data, uint32_t slot_id)
 {
         struct axlf *axlf = (struct axlf *)data;
         struct axlf *axlf_head = axlf;
@@ -904,7 +904,6 @@ zocl_xclbin_load_pskernel(struct drm_zocl_dev *zdev, void *data)
 	void *aie_res = 0;
 	struct device_node *aienode = NULL;
 	uint8_t hw_gen = 1;
-	uint32_t slot_id = 0;
 
         if (memcmp(axlf_head->m_magic, "xclbin2", 8)) {
                 DRM_INFO("Invalid xclbin magic string");
@@ -912,9 +911,6 @@ zocl_xclbin_load_pskernel(struct drm_zocl_dev *zdev, void *data)
         }
 
 	BUG_ON(!zdev);
-	// Currently only 1 slot - TODO: Support multi-slot in the future
-	slot_id = axlf->m_header.m_debug_bin[0];
-	printk ("************************************************** Incoming Slot %d\n", slot_id);
 	slot = zdev->pr_slot[slot_id];
 
         mutex_lock(&slot->slot_xclbin_lock);

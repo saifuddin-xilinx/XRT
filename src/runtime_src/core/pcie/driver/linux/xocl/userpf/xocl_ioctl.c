@@ -723,9 +723,6 @@ xocl_read_axlf_helper(struct xocl_drm *drm_p, struct drm_xocl_axlf *axlf_ptr,
 
 	memcpy(&axlf_obj->kds_cfg, &axlf_ptr->kds_cfg, sizeof(axlf_ptr->kds_cfg));
 
-	/* SAIF HACK */
-	axlf->m_header.m_debug_bin[0] = slot_id;
-
 	err = xocl_icap_download_axlf(xdev, axlf, slot_id);
 	/*
 	 * Don't just bail out here, always recreate drm mem

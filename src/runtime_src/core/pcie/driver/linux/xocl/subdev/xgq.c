@@ -776,7 +776,7 @@ static void vmr_cq_result_copy(struct xocl_xgq_vmr *xgq, struct xocl_xgq_vmr_cmd
  * Utilize shared memory between host and device to transfer data.
  */
 static ssize_t xgq_transfer_data(struct xocl_xgq_vmr *xgq, const void *buf,
-	u64 len, u64 priv, enum xgq_cmd_opcode opcode, u32 timer)
+	u64 len, u32 priv, enum xgq_cmd_opcode opcode, u32 timer)
 {
 	struct xocl_xgq_vmr_cmd *cmd = NULL;
 	struct xgq_cmd_data_payload *payload = NULL;
@@ -900,7 +900,7 @@ static int xgq_load_xclbin(struct platform_device *pdev,
 }
 
 static int xgq_load_xclbin_slot(struct platform_device *pdev,
-	const void *u_xclbin, uint64_t slot)
+	const void *u_xclbin, uint32_t slot)
 {
 	struct xocl_xgq_vmr *xgq = platform_get_drvdata(pdev);
 	struct axlf *xclbin = (struct axlf *)u_xclbin;

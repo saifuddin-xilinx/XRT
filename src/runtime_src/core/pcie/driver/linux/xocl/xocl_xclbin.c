@@ -24,6 +24,7 @@ struct xclbin_arg {
 	struct axlf 		*xclbin;
 	struct xocl_subdev 	*urpdevs;
 	int 			num_dev;
+	uint32_t 		slot_id;
 };
 
 static int versal_xclbin_pre_download(xdev_handle_t xdev, void *args)
@@ -213,6 +214,7 @@ static int xocl_xclbin_download_impl(xdev_handle_t xdev, const void *xclbin,
 		.xdev = xdev,
 		.xclbin = (struct axlf *)xclbin,
 		.num_dev = 0,
+		.slot_id = slot_id;
 	};
 	int ret = 0;
 
