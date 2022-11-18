@@ -214,7 +214,7 @@ static int xocl_xclbin_download_impl(xdev_handle_t xdev, const void *xclbin,
 		.xdev = xdev,
 		.xclbin = (struct axlf *)xclbin,
 		.num_dev = 0,
-		.slot_id = slot_id;
+		.slot_id = slot_id,
 	};
 	int ret = 0;
 
