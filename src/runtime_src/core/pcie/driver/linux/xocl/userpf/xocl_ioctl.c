@@ -342,7 +342,6 @@ static bool ps_xclbin_downloaded(struct xocl_dev *xdev, xuid_t *xclbin_id, uint3
 	int err = 0;
     int i = 0;
 	xuid_t *downloaded_xclbin =  NULL;
-	bool changed = false;
 
     for (i = 0; i < MAX_SLOT_SUPPORT; i++) {
         if (i == DEFAULT_PL_SLOT)
