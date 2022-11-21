@@ -15,6 +15,7 @@
  * GNU General Public License for more details.
  */
 #include "common.h"
+#include "xclfeatures.h"
 #include "kds_core.h"
 
 extern int kds_echo;

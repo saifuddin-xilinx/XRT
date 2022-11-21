@@ -124,6 +124,7 @@ enum xgq_cmd_log_page_type {
 	XGQ_CMD_LOG_TASK_STATS  = 0x5,
 	XGQ_CMD_LOG_MEM_STATS	= 0x6,
 	XGQ_CMD_LOG_SYSTEM_DTB	= 0x7,
+	XGQ_CMD_LOG_PLM_LOG	= 0x8,
 };
 
 /**
@@ -366,7 +367,8 @@ struct xgq_cmd_cq_vmr_payload {
 	uint16_t has_ext_sysdtb:1;
 	uint16_t ps_is_ready:1;
 	uint16_t pl_is_ready:1;
-	uint16_t resvd1:5;
+	uint16_t sc_is_ready:1;
+	uint16_t resvd1:4;
 	uint16_t current_multi_boot_offset;
 	uint32_t debug_level:3;
 	uint32_t program_progress:7;

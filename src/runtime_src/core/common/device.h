@@ -109,7 +109,6 @@ public:
   using slot_id = xclbin_map::slot_id;
   using handle_type = xclDeviceHandle;
   using memory_type = xrt::xclbin::mem::memory_type;
-  std::mutex device_lock;
 
 public:
   XRT_CORE_COMMON_EXPORT
@@ -465,6 +464,7 @@ public:
 
  private:
   id_type m_device_id;
+  std::mutex device_lock;
   mutable boost::optional<bool> m_nodma = boost::none;
 
   using name2idx_type = std::map<std::string, cuidx_type>;
@@ -510,6 +510,36 @@ device_query(const std::shared_ptr<device>& device, Args&&... args)
 {
   auto ret = device->query<QueryRequestType>(std::forward<Args>(args)...);
   return boost::any_cast<typename QueryRequestType::result_type>(ret);
+}
+
+template <typename QueryRequestType>
+inline typename QueryRequestType::result_type
+device_query_default(const device* device, const typename QueryRequestType::result_type& default_value)
+{
+  try {
+    return device_query<QueryRequestType>(device);
+  }
+  catch (const query::no_such_key&) {
+    return default_value;
+  }
+  catch (const query::sysfs_error&) {
+    return default_value;
+  }
+}
+
+template <typename QueryRequestType>
+inline typename QueryRequestType::result_type
+device_query_default(const std::shared_ptr<device>& device, const typename QueryRequestType::result_type& default_value)
+{
+  try {
+    return device_query<QueryRequestType>(device);
+  }
+  catch (const query::no_such_key&) {
+    return default_value;
+  }
+  catch (const query::sysfs_error&) {
+    return default_value;
+  }
 }
 
 template <typename QueryRequestType, typename ...Args>

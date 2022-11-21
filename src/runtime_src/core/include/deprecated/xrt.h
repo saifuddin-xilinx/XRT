@@ -81,6 +81,34 @@ typedef unsigned int xclBufferHandle;
 #define XRT_NULL_BO NULLBO
 
 /*
+ * typedef xrt_buffer_handle - opaque buffer handle
+ *
+ * A buffer handle of xrt_buffer_handle kind is obtained by allocating buffer
+ * objects through ISHIM API. The buffer handle is used by XRT ISHIM APIs
+ * that operate on on buffer objects.
+ */
+typedef void * xrt_buffer_handle;
+#define XRT_INVALID_BUFFER_HANDLE	NULL
+
+static inline xclBufferHandle
+to_xclBufferHandle(xrt_buffer_handle hdl)
+{
+  return hdl == XRT_INVALID_BUFFER_HANDLE
+    ? XRT_NULL_BO
+#ifdef _WIN32
+    : hdl; // No cast needed, happen to be the same define as xclBufferHandle
+#else
+    : (xclBufferHandle)(uintptr_t)hdl;
+#endif
+}
+
+static inline xrt_buffer_handle
+to_xrt_buffer_handle(xclBufferHandle hdl)
+{
+  return hdl == XRT_NULL_BO ? XRT_INVALID_BUFFER_HANDLE : (xrt_buffer_handle)(uintptr_t)hdl;
+}
+
+/*
  * typedef xclBufferExportHandle
  *
  * Implementation specific type representing an exported buffer handle
