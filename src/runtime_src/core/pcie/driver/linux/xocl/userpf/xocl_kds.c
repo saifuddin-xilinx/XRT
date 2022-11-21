@@ -1829,8 +1829,13 @@ xocl_kds_create_cus(struct xocl_dev *xdev, struct xrt_cu_info *cu_info,
 		subdev_info.priv_data = &cu_info[i];
 		subdev_info.data_len = sizeof(struct xrt_cu_info);
 		subdev_info.override_idx = i;
-		if (xocl_subdev_create(xdev, &subdev_info))
+		if (xocl_subdev_create(xdev, &subdev_info)) {
 			userpf_info(xdev, "Create CU %s failed. Skip", cu_info[i].iname);
+			return;
+		}
+
+		/* Update the subdev index for future reference */
+		cu_info[i].inst_idx = subdev_info.dev_idx;
 	}
 }
 
@@ -1846,8 +1851,13 @@ xocl_kds_create_scus(struct xocl_dev *xdev, struct xrt_cu_info *cu_info,
 		subdev_info.priv_data = &cu_info[i];
 		subdev_info.data_len = sizeof(struct xrt_cu_info);
 		subdev_info.override_idx = i;
-		if (xocl_subdev_create(xdev, &subdev_info))
+		if (xocl_subdev_create(xdev, &subdev_info)) {
 			userpf_info(xdev, "Create SCU %s failed. Skip", cu_info[i].iname);
+			return;
+		}
+
+		/* Update the subdev index for future reference */
+		cu_info[i].inst_idx = subdev_info.dev_idx;
 	}
 }
 
@@ -2542,9 +2552,8 @@ int xocl_kds_unregister_cus(struct xocl_dev *xdev, int slot_hdl)
 	 */
 	xocl_kds_xgq_identify(xdev, &major, &minor);
 	userpf_info(xdev, "Got ERT XGQ command version %d.%d\n", major, minor);
-	if (major == 2 && minor == 0) {
-		/* Unconfigure the CUs support only 2.0 version */
-		cu_mgmt = &XDEV(xdev)->kds.cu_mgmt;
+
+	cu_mgmt = &XDEV(xdev)->kds.cu_mgmt;
 		for (i = 0; i < MAX_CUS; i++) {
 			xcu = cu_mgmt->xcus[i];
 			if (!xcu)
@@ -2554,12 +2563,16 @@ int xocl_kds_unregister_cus(struct xocl_dev *xdev, int slot_hdl)
 			if (xcu->info.slot_idx != slot_hdl)
 				continue;
 
+		/* Unconfigure the CUs support only 2.0 version */
+		if (major == 2 && minor == 0) {
 			ret = xocl_kds_xgq_uncfg_cu(xdev, i, DOMAIN_PL);
 			if (ret)
 				goto out;
 		}
+		xocl_subdev_destroy_by_id_and_inst(xdev,
+				XOCL_SUBDEV_CU, xcu->info.inst_idx);
+	}
 
-		/* Unconfigure the SCUs */
 		cu_mgmt = &XDEV(xdev)->kds.scu_mgmt;
 		for (i = 0; i < MAX_CUS; i++) {
 			xcu = cu_mgmt->xcus[i];
@@ -2570,10 +2583,14 @@ int xocl_kds_unregister_cus(struct xocl_dev *xdev, int slot_hdl)
 			if (xcu->info.slot_idx != slot_hdl)
 				continue;
 
+		/* Unconfigure the SCUs support only 2.0 version */
+		if (major == 2 && minor == 0) {
 			ret = xocl_kds_xgq_uncfg_cu(xdev, i, DOMAIN_PS);
 			if (ret)
 				goto out;
 		}
+		xocl_subdev_destroy_by_id_and_inst(xdev,
+				XOCL_SUBDEV_SCU, xcu->info.inst_idx);
 	}
 
 	ret = xocl_kds_xgq_cfg_end(xdev);
