@@ -49,13 +49,14 @@ enum kds_status {
 	KDS_ERROR,
 	KDS_ABORT,
 	KDS_TIMEOUT,
-	KDS_STAT_MAX,
+	KDS_SKCRASHED,
+	KDS_STAT_MAX, // Always the last one
 };
 
 struct kds_command;
 
 struct kds_cmd_ops {
-	void (*notify_host)(struct kds_command *xcmd, int status);
+	void (*notify_host)(struct kds_command *xcmd, enum kds_status status);
 	void (*free)(struct kds_command *xcmd);
 };
 
