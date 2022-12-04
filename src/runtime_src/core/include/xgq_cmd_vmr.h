@@ -125,6 +125,7 @@ enum xgq_cmd_log_page_type {
 	XGQ_CMD_LOG_MEM_STATS	= 0x6,
 	XGQ_CMD_LOG_SYSTEM_DTB	= 0x7,
 	XGQ_CMD_LOG_PLM_LOG	= 0x8,
+
 };
 
 /**
@@ -210,7 +211,7 @@ struct xgq_cmd_data_payload {
 	uint32_t flash_type:4;
 	uint32_t rsvd1:24;
 	uint32_t pad1;
-	uint32_t priv;
+	uint64_t priv;
 };
 
 enum xgq_cmd_flash_type {
@@ -396,6 +397,10 @@ struct xgq_cmd_cq_vmr_identify_payload {
  * @clock_payload:
  * @sensor_payload:
  * @multiboot_payload:
+ * @log_payload:
+ * @xclbin_payload:
+ * @clk_scaling_payload:
+ * @vmr_identify_payload:
  */
 struct xgq_cmd_cq {
 	struct xgq_cmd_cq_hdr hdr;

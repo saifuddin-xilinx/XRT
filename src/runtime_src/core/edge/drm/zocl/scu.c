@@ -368,6 +368,7 @@ int zocl_scu_wait_ready(struct platform_device *pdev)
 	return 0;
 }
 
+// Signal SKD Ready
 void zocl_scu_sk_ready(struct platform_device *pdev)
 {
 	struct zocl_scu *zcu = platform_get_drvdata(pdev);

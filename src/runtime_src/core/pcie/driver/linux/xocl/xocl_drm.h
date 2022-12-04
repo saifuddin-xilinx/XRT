@@ -116,7 +116,7 @@ struct drm_xocl_unmgd {
 };
 
 struct drm_xocl_bo *__xocl_create_bo_ioctl(struct drm_device *dev,
-	struct drm_file *filp, struct drm_xocl_create_bo *args);
+	struct drm_xocl_create_bo *args);
 struct drm_xocl_bo *xocl_drm_create_bo(struct xocl_drm *drm_p,
 	uint64_t unaligned_size, unsigned user_flags);
 void xocl_drm_free_bo(struct drm_gem_object *obj);
@@ -127,8 +127,8 @@ void xocl_mm_get_usage_stat(struct xocl_drm *drm_p, u32 ddr,
 void xocl_mm_update_usage_stat(struct xocl_drm *drm_p, u32 ddr,
         u64 size, int count);
 
-int xocl_mm_insert_node(struct xocl_drm *drm_p, unsigned *memidx,
-                uint32_t slotidx, struct drm_mm_node *node, u64 size);
+int xocl_mm_insert_node(struct xocl_drm *drm_p, unsigned memidx,
+                uint32_t slotidx, struct drm_xocl_bo *xobj, u64 size);
 
 void *xocl_drm_init(xdev_handle_t xdev);
 void xocl_drm_fini(struct xocl_drm *drm_p);

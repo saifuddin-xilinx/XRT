@@ -12,6 +12,7 @@
 #include "common.h"
 #include "xocl_errors.h"
 #include "kds_core.h"
+#include "kds_ert_table.h"
 /* Need detect fast adapter and find out cmdmem
  * Cound not avoid coupling xclbin.h
  */
@@ -180,41 +181,11 @@ xocl_ctx_to_info(struct drm_xocl_ctx *args, struct kds_client_cu_info *cu_info)
                 cu_info->flags = CU_CTX_SHARED;
 }
 
-static int get_slot_id(struct xocl_dev *xdev, const uuid_t *id, uint32_t *slot_id)
-{
-	uuid_t *xclbin_id = NULL;
-        int i = 0;
-        int ret = -EINVAL;
-
-	/* First check whether uuid exists or not */
-	for (i = 0; i < MAX_SLOT_SUPPORT; i++) {
-		ret = XOCL_GET_XCLBIN_ID(xdev, xclbin_id, i);
-		if (ret) {
-			ret = -EINVAL;
-			goto done;
-		}
-		if (!xclbin_id)
-			continue;
-
-		if (uuid_equal(id, xclbin_id)) {
-			*slot_id = i;
-			ret = 0;
-			XOCL_PUT_XCLBIN_ID(xdev, i);
-			break;
-		}
-		XOCL_PUT_XCLBIN_ID(xdev, i);
-		xclbin_id = NULL;
-	}
-
-done:
-        return ret;
-}
-
 static int xocl_add_context(struct xocl_dev *xdev, struct kds_client *client,
 			    struct drm_xocl_ctx *args)
 {
 	xuid_t *uuid;
-	uint32_t slot_id = 0;
+	struct kds_client_hw_ctx *hw_ctx = NULL;
 	struct kds_client_cu_ctx *cu_ctx = NULL;
 	struct kds_client_cu_info cu_info = { };
 	int ret;
@@ -229,16 +200,10 @@ static int xocl_add_context(struct xocl_dev *xdev, struct kds_client *client,
 			goto out;
 		}
 
-		ret = get_slot_id(xdev, &args->xclbin_id, &slot_id);
-                if (ret) {
-                        userpf_err(xdev, "No slot matched for this xclbin");
-			vfree(client->ctx);
-                        goto out;
-                }
-
-		ret = xocl_icap_lock_bitstream(xdev, &args->xclbin_id, slot_id);
+		ret = xocl_icap_lock_bitstream(xdev, &args->xclbin_id);
 		if (ret) {
 			vfree(client->ctx);
+			client->ctx = NULL;
 			goto out;
 		}
 
@@ -246,6 +211,7 @@ static int xocl_add_context(struct xocl_dev *xdev, struct kds_client *client,
 		if (!uuid) {
 			ret = -ENOMEM;
 			vfree(client->ctx);
+			client->ctx = NULL;
 			(void) xocl_icap_unlock_bitstream(xdev,
 					&args->xclbin_id, slot_id);
 			goto out;
@@ -253,9 +219,19 @@ static int xocl_add_context(struct xocl_dev *xdev, struct kds_client *client,
 
 		uuid_copy(uuid, &args->xclbin_id);
 		client->ctx->xclbin_id = uuid;
-		client->ctx->slot_idx = slot_id;
 		/* Multiple CU context can be active. Initializing CU context list */
 		INIT_LIST_HEAD(&client->ctx->cu_ctx_list);
+		
+		/* This is required to maintain the command stats per hw context. 
+		 * For legacy context case assume there is only one hw context present
+		 * of id 0.
+		 */
+		client->next_hw_ctx_id = 0;
+		hw_ctx = kds_alloc_hw_ctx(client, uuid, 0 /*slot id */);
+		if (!hw_ctx) {
+			ret = -EINVAL;
+			goto out1;
+		}
 	}
 
 	/* Bitstream is locked. No one could load a new one
@@ -268,6 +244,7 @@ static int xocl_add_context(struct xocl_dev *xdev, struct kds_client *client,
 		ret = -EINVAL;
 		goto out1;
 	}
+	cu_ctx->hw_ctx = hw_ctx;
 
 	ret = kds_add_context(&XDEV(xdev)->kds, client, cu_ctx);
 	if (ret) {
@@ -334,11 +311,19 @@ static int xocl_del_context(struct xocl_dev *xdev, struct kds_client *client,
 	if (ret)
 		goto out;
 
+	if (cu_ctx->hw_ctx) {
+		slot_id  = cu_ctx->hw_ctx->slot_idx;
+		ret = kds_free_hw_ctx(client, cu_ctx->hw_ctx);
+		if (ret)
+			goto out;
+
+		cu_ctx->hw_ctx = NULL;
+	}
+
 	/* unlock bitstream if there is no opening context */
 	if (list_empty(&client->ctx->cu_ctx_list)) {
 		vfree(client->ctx->xclbin_id);
 		client->ctx->xclbin_id = NULL;
-		slot_id = client->ctx->slot_idx;
 		(void) xocl_icap_unlock_bitstream(xdev,
 				&args->xclbin_id, slot_id);
 		vfree(client->ctx);
@@ -707,10 +692,11 @@ static inline void read_ert_stat(struct kds_command *xcmd)
 	mutex_unlock(&kds->scu_mgmt.lock);
 }
 
-static void notify_execbuf(struct kds_command *xcmd, int status)
+static void notify_execbuf(struct kds_command *xcmd, enum kds_status status)
 {
 	struct kds_client *client = xcmd->client;
 	struct ert_packet *ecmd = (struct ert_packet *)xcmd->u_execbuf;
+	uint32_t hw_ctx = xcmd->hw_ctx_id;
 
 	if (xcmd->opcode == OP_START_SK) {
 		/* For PS kernel get cmd state and return_code */
@@ -720,19 +706,11 @@ static void notify_execbuf(struct kds_command *xcmd, int status)
 		if (scmd->state < ERT_CMD_STATE_COMPLETED)
 			/* It is old shell, return code is missing */
 			ert_write_return_code(scmd, -ENODATA);
-		status = scmd->state;
 	} else {
 		if (xcmd->opcode == OP_GET_STAT)
 			read_ert_stat(xcmd);
 
-		if (status == KDS_COMPLETED)
-			ecmd->state = ERT_CMD_STATE_COMPLETED;
-		else if (status == KDS_ERROR)
-			ecmd->state = ERT_CMD_STATE_ERROR;
-		else if (status == KDS_TIMEOUT)
-			ecmd->state = ERT_CMD_STATE_TIMEOUT;
-		else if (status == KDS_ABORT)
-			ecmd->state = ERT_CMD_STATE_ABORT;
+		ecmd->state = kds_ert_table[status];
 	}
 
 	if (xcmd->timestamp_enabled) {
@@ -752,10 +730,10 @@ static void notify_execbuf(struct kds_command *xcmd, int status)
 	kfree(xcmd->execbuf);
 
 	if (xcmd->cu_idx >= 0)
-		client_stat_inc(client, c_cnt[xcmd->cu_idx]);
+		client_stat_inc(client, hw_ctx, c_cnt[xcmd->cu_idx]);
 
 	if (xcmd->inkern_cb) {
-		int error = (status == ERT_CMD_STATE_COMPLETED)?0:-EFAULT;
+		int error = (status == KDS_COMPLETED) ? 0 : -EFAULT;
 		xcmd->inkern_cb->func((unsigned long)xcmd->inkern_cb->data, error);
 		kfree(xcmd->inkern_cb);
 	} else {
@@ -764,10 +742,11 @@ static void notify_execbuf(struct kds_command *xcmd, int status)
 	}
 }
 
-static void notify_execbuf_xgq(struct kds_command *xcmd, int status)
+static void notify_execbuf_xgq(struct kds_command *xcmd, enum kds_status status)
 {
 	struct kds_client *client = xcmd->client;
 	struct ert_packet *ecmd = (struct ert_packet *)xcmd->u_execbuf;
+	uint32_t hw_ctx = xcmd->hw_ctx_id;
 
 	if (xcmd->opcode == OP_GET_STAT)
 		read_ert_stat(xcmd);
@@ -778,17 +757,10 @@ static void notify_execbuf_xgq(struct kds_command *xcmd, int status)
 		scmd = (struct ert_start_kernel_cmd *)ecmd;
 		ert_write_return_code(scmd, xcmd->rcode);
 
-		client_stat_inc(client, scu_c_cnt[xcmd->cu_idx]);
+		client_stat_inc(client, hw_ctx, scu_c_cnt[xcmd->cu_idx]);
 	}
 
-	if (status == KDS_COMPLETED)
-		ecmd->state = ERT_CMD_STATE_COMPLETED;
-	else if (status == KDS_ERROR)
-		ecmd->state = ERT_CMD_STATE_ERROR;
-	else if (status == KDS_TIMEOUT)
-		ecmd->state = ERT_CMD_STATE_TIMEOUT;
-	else if (status == KDS_ABORT)
-		ecmd->state = ERT_CMD_STATE_ABORT;
+	ecmd->state = kds_ert_table[status];
 
 	if (xcmd->timestamp_enabled) {
 		/* Only start kernel command supports timestamps */
@@ -807,10 +779,10 @@ static void notify_execbuf_xgq(struct kds_command *xcmd, int status)
 	kfree(xcmd->execbuf);
 
 	if (xcmd->opcode == OP_START)
-		client_stat_inc(client, c_cnt[xcmd->cu_idx]);
+		client_stat_inc(client, hw_ctx, c_cnt[xcmd->cu_idx]);
 
 	if (xcmd->inkern_cb) {
-		int error = (status == ERT_CMD_STATE_COMPLETED)?0:-EFAULT;
+		int error = (status == KDS_COMPLETED) ? 0 : -EFAULT;
 		xcmd->inkern_cb->func((unsigned long)xcmd->inkern_cb->data, error);
 		kfree(xcmd->inkern_cb);
 	} else {
@@ -1052,6 +1024,7 @@ static int xocl_command_ioctl(struct xocl_dev *xdev, void *data,
 	xcmd->u_execbuf = xobj->vmapping;
 	xcmd->gem_obj = obj;
 	xcmd->exec_bo_handle = args->exec_bo_handle;
+	xcmd->hw_ctx_id = args->ctx_id;
 
 	print_ecmd_info(ecmd);
 
@@ -1062,7 +1035,7 @@ static int xocl_command_ioctl(struct xocl_dev *xdev, void *data,
 			goto out2;
 		goto out1;
 	}
-	
+
 	xcmd->cb.notify_host = notify_execbuf;
 
 	/* xcmd->type is the only thing determine who to handle this command.
@@ -1173,6 +1146,19 @@ out:
 		XOCL_DRM_GEM_OBJECT_PUT_UNLOCKED(obj);
 	}
 	return ret;
+}
+
+int xocl_hw_ctx_command(struct xocl_dev *xdev, void *data,
+			      struct drm_file *filp)
+{
+	struct drm_xocl_hw_ctx_execbuf *args = data;
+	struct drm_xocl_execbuf legacy_args = { 0 };
+
+	/* Update the legacy structure with the appropiate value */
+	legacy_args.ctx_id = args->hw_ctx_id;
+	legacy_args.exec_bo_handle = args->exec_bo_handle;
+
+	return xocl_command_ioctl(xdev, &legacy_args, filp, false);
 }
 
 int xocl_create_client(struct xocl_dev *xdev, void **priv)
@@ -1478,19 +1464,12 @@ done:
 	return ret;
 }
 
-static void xocl_cfg_notify(struct kds_command *xcmd, int status)
+static void xocl_cfg_notify(struct kds_command *xcmd, enum kds_status status)
 {
 	struct ert_packet *ecmd = (struct ert_packet *)xcmd->execbuf;
 	struct kds_sched *kds = (struct kds_sched *)xcmd->priv;
 
-	if (status == KDS_COMPLETED)
-		ecmd->state = ERT_CMD_STATE_COMPLETED;
-	else if (status == KDS_ERROR)
-		ecmd->state = ERT_CMD_STATE_ERROR;
-	else if (status == KDS_TIMEOUT)
-		ecmd->state = ERT_CMD_STATE_TIMEOUT;
-	else if (status == KDS_ABORT)
-		ecmd->state = ERT_CMD_STATE_ABORT;
+	ecmd->state = kds_ert_table[status];
 
 	complete(&kds->comp);
 }
@@ -1892,7 +1871,7 @@ static int xocl_kds_update_legacy(struct xocl_dev *xdev, struct drm_xocl_kds cfg
 	return ret;
 }
 
-static void xocl_kds_xgq_notify(struct kds_command *xcmd, int status)
+static void xocl_kds_xgq_notify(struct kds_command *xcmd, enum kds_status status)
 {
 	struct kds_sched *kds = (struct kds_sched *)xcmd->priv;
 	struct xgq_com_queue_entry *resp = xcmd->response;

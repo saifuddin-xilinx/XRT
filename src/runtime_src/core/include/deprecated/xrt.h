@@ -67,9 +67,9 @@ typedef void * xclDeviceHandle;
 /*
  * typedef xclBufferHandle - opaque buffer handle
  *
- * A buffer handle of xclBufferHandle kind is obtained by allocating
- * buffer objects. The buffer handle is used by XRT APIs that operate
- * on on buffer objects.
+ * A buffer handle of xclBufferHandle kind is obtained by allocating buffer
+ * objects through HAL API. The buffer handle is used by XRT HAL APIs that
+ * operate on on buffer objects.
  */
 #ifdef _WIN32
 typedef void * xclBufferHandle;

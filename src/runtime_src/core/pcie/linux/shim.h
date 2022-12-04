@@ -125,6 +125,7 @@ public:
 
   // Execute and interrupt abstraction
   int xclExecBuf(unsigned int cmdBO);
+  int xclExecBuf(unsigned int cmdBO, xcl_hwctx_handle ctxhdl);
   int xclExecBuf(unsigned int cmdBO,size_t numdeps, unsigned int* bo_wait_list);
   int xclRegisterEventNotify(unsigned int userInterrupt, int fd);
   int xclExecWait(int timeoutMilliSec);
@@ -159,6 +160,9 @@ public:
   void
   register_xclbin(const xrt::xclbin&);
 
+  // Exec Buf with hw ctx handle.
+  void
+  exec_buf(xclBufferHandle boh, xcl_hwctx_handle ctxhdl);
 private:
   std::shared_ptr<xrt_core::device> mCoreDevice;
   std::shared_ptr<xrt_core::pci::dev> mDev;

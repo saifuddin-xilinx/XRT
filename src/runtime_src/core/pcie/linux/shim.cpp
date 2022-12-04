@@ -854,7 +854,7 @@ int shim::execbufCopyBO(unsigned int dst_bo_handle,
     ert_fill_copybo_cmd(bo.second, src_bo_handle, dst_bo_handle,
                         src_offset, dst_offset, size);
 
-    int ret = xclExecBuf(bo.first);
+    int ret = xclExecBuf(to_xclBufferHandle(bo.first));
     if (ret) {
         mCmdBOCache->release<ert_start_copybo_cmd>(bo);
         return ret;
@@ -908,7 +908,7 @@ int shim::xclUpdateSchedulerStat()
     bo.second->opcode = ERT_CU_STAT;
     bo.second->type = ERT_CTRL;
 
-    int ret = xclExecBuf(bo.first);
+    int ret = xclExecBuf(to_xclBufferHandle(bo.first));
     if (ret) {
         mCmdBOCache->release(bo);
         return ret;
@@ -1515,28 +1515,29 @@ int shim::xclLoadHwAxlf(const axlf *buffer, drm_xocl_create_hw_ctx *hw_ctx)
     axlf_obj.kernels = krnl_binary.data();
 
     auto ret = xclPrepareAxlf(buffer, &axlf_obj);
-    if (!ret) {
-        hw_ctx->axlf_ptr = &axlf_obj;
-        ret = mDev->ioctl(mUserHandle, DRM_IOCTL_XOCL_CREATE_HW_CTX, hw_ctx);
-        if (ret && errno == EAGAIN) {
-            //special case for aws
-            //if EAGAIN is seen, that means a pcie removal&rescan is ongoing, let's just
-            //wait and reload 2nd time -- this time the there will be no device id
-            //change, hence no pcie removal&rescan, anymore
-            //we need to close the device otherwise the removal&rescan (unload driver) will hang
+    if (ret)
+    	return -errno;
+
+    hw_ctx->axlf_ptr = &axlf_obj;
+    ret = mDev->ioctl(mUserHandle, DRM_IOCTL_XOCL_CREATE_HW_CTX, hw_ctx);
+    if (ret && errno == EAGAIN) {
+	    //special case for aws
+	    //if EAGAIN is seen, that means a pcie removal&rescan is ongoing, let's just
+	    //wait and reload 2nd time -- this time the there will be no device id
+	    //change, hence no pcie removal&rescan, anymore
+	    //we need to close the device otherwise the removal&rescan (unload driver) will hang
 	    //we also need to reopen the device once removal&rescan completes
-            int dev_hotplug_done = 0;
-            std::string err;
-            dev_fini();
-            std::this_thread::sleep_for(std::chrono::seconds(5));
-            while (!dev_hotplug_done) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(500));
-				xrt_core::pci::get_dev(mBoardNumber)->sysfs_get<int>("",
-                "dev_hotplug_done", err, dev_hotplug_done, 0);
-            }
-            dev_init();
-            ret = mDev->ioctl(mUserHandle, DRM_IOCTL_XOCL_CREATE_HW_CTX, hw_ctx);
-	}
+	    int dev_hotplug_done = 0;
+	    std::string err;
+	    dev_fini();
+	    std::this_thread::sleep_for(std::chrono::seconds(5));
+	    while (!dev_hotplug_done) {
+		    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+		    xrt_core::pci::get_dev(mBoardNumber)->sysfs_get<int>("",
+				    "dev_hotplug_done", err, dev_hotplug_done, 0);
+	    }
+	    dev_init();
+	    ret = mDev->ioctl(mUserHandle, DRM_IOCTL_XOCL_CREATE_HW_CTX, hw_ctx);
     }
 
     if (ret)
@@ -1577,27 +1578,28 @@ int shim::xclLoadAxlf(const axlf *buffer)
     axlf_obj.kernels = krnl_binary.data();
 
     auto ret = xclPrepareAxlf(buffer, &axlf_obj);
-    if (!ret) {
-        ret = mDev->ioctl(mUserHandle, DRM_IOCTL_XOCL_READ_AXLF, &axlf_obj);
-        if (ret && errno == EAGAIN) {
-            //special case for aws
-            //if EAGAIN is seen, that means a pcie removal&rescan is ongoing, let's just
-            //wait and reload 2nd time -- this time the there will be no device id
-            //change, hence no pcie removal&rescan, anymore
-            //we need to close the device otherwise the removal&rescan (unload driver) will hang
+    if (ret)
+	    return -errno;
+
+    ret = mDev->ioctl(mUserHandle, DRM_IOCTL_XOCL_READ_AXLF, &axlf_obj);
+    if (ret && errno == EAGAIN) {
+	    //special case for aws
+	    //if EAGAIN is seen, that means a pcie removal&rescan is ongoing, let's just
+	    //wait and reload 2nd time -- this time the there will be no device id
+	    //change, hence no pcie removal&rescan, anymore
+	    //we need to close the device otherwise the removal&rescan (unload driver) will hang
 	    //we also need to reopen the device once removal&rescan completes
-            int dev_hotplug_done = 0;
-            std::string err;
-            dev_fini();
-            std::this_thread::sleep_for(std::chrono::seconds(5));
-            while (!dev_hotplug_done) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(500));
-				xrt_core::pci::get_dev(mBoardNumber)->sysfs_get<int>("",
-                "dev_hotplug_done", err, dev_hotplug_done, 0);
-            }
-            dev_init();
-            ret = mDev->ioctl(mUserHandle, DRM_IOCTL_XOCL_READ_AXLF, &axlf_obj);
-        }
+	    int dev_hotplug_done = 0;
+	    std::string err;
+	    dev_fini();
+	    std::this_thread::sleep_for(std::chrono::seconds(5));
+	    while (!dev_hotplug_done) {
+		    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+		    xrt_core::pci::get_dev(mBoardNumber)->sysfs_get<int>("",
+				    "dev_hotplug_done", err, dev_hotplug_done, 0);
+	    }
+	    dev_init();
+	    ret = mDev->ioctl(mUserHandle, DRM_IOCTL_XOCL_READ_AXLF, &axlf_obj);
     }
 
     if (ret)
@@ -1826,6 +1828,18 @@ int shim::xclExecBuf(unsigned int cmdBO)
     xrt_logmsg(XRT_INFO, "%s, cmdBO: %d", __func__, cmdBO);
     drm_xocl_execbuf exec = {0, cmdBO, 0,0,0,0,0,0,0,0};
     ret = mDev->ioctl(mUserHandle, DRM_IOCTL_XOCL_EXECBUF, &exec);
+    return ret ? -errno : ret;
+}
+
+/*
+ * xclExecBuf()
+ */
+int shim::xclExecBuf(unsigned int cmdBO, xcl_hwctx_handle ctxhdl)
+{
+    int ret;
+    xrt_logmsg(XRT_INFO, "%s, cmdBO: %d", __func__, cmdBO);
+    drm_xocl_hw_ctx_execbuf exec = {ctxhdl, cmdBO, 0,0,0,0,0,0,0,0};
+    ret = mDev->ioctl(mUserHandle, DRM_IOCTL_XOCL_HW_CTX_EXECBUF, &exec);
     return ret ? -errno : ret;
 }
 
@@ -2392,8 +2406,23 @@ void
 shim::
 register_xclbin(const xrt::xclbin&)
 {
-  /* XRT Core will register the new XCLBIN. No action required here */
+  // Explicit hardware contexts are not supported in Alveo.
   xrt_logmsg(XRT_INFO, "%s: XCLBIN successfully registered for this device", __func__);
+}
+
+// Exec Buf with hw ctx handle.
+void
+shim::
+exec_buf(xclBufferHandle boh, xcl_hwctx_handle ctxhdl)
+{
+  // TODO: Implement new function, for now just call legacy xclExecBuf().
+  if (ctxhdl == XRT_NULL_HWCTX) {
+    if (auto ret = xclExecBuf(boh))
+      throw xrt_core::system_error(ret, "failed to launch execution buffer");
+  } else {
+    if (auto ret = xclExecBuf(boh, ctxhdl))
+      throw xrt_core::system_error(ret, "failed to launch hw ctx execution buffer");
+  }
 }
 
 } // namespace xocl
@@ -2447,6 +2476,13 @@ register_xclbin(xclDeviceHandle handle, const xrt::xclbin& xclbin)
   shim->register_xclbin(xclbin);
 }
 
+// Exec Buf with hw ctx handle.
+void
+exec_buf(xclDeviceHandle handle, xrt_buffer_handle bohdl, xcl_hwctx_handle ctxhdl)
+{
+    auto shim = get_shim_object(handle);
+    return shim->exec_buf(to_xclBufferHandle(bohdl), ctxhdl);
+}
 
 } // xrt::shim_int
 ////////////////////////////////////////////////////////////////

@@ -433,6 +433,8 @@ static const struct drm_ioctl_desc xocl_ioctls[] = {
 			  DRM_AUTH|DRM_UNLOCKED|DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(XOCL_EXECBUF, xocl_execbuf_ioctl,
 			  DRM_AUTH|DRM_UNLOCKED|DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(XOCL_HW_CTX_EXECBUF, xocl_hw_ctx_execbuf_ioctl,
+			  DRM_AUTH|DRM_UNLOCKED|DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(XOCL_COPY_BO, xocl_copy_bo_ioctl,
 			  DRM_AUTH|DRM_UNLOCKED|DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(XOCL_HOT_RESET, xocl_hot_reset_ioctl,
@@ -663,29 +665,29 @@ void xocl_drm_fini(struct xocl_drm *drm_p)
 void xocl_mm_get_usage_stat(struct xocl_drm *drm_p, u32 ddr,
 	struct drm_xocl_mm_stat *pstat)
 {
-	struct xocl_mm *xocl_mm = drm_p->xocl_mm;
+	struct drm_xocl_mm_stat *mm_stat = &drm_p->mm_usage_stat[ddr];
 
-	if (!xocl_mm && !xocl_mm->mm_usage_stat)
+	if (!pstat) {
+        	xocl_err(drm_p->ddev->dev, "Invalid memory %d stats", ddr);
 		return;
+	}
 
-	pstat->memory_usage = xocl_mm->mm_usage_stat[ddr] ?
-		xocl_mm->mm_usage_stat[ddr]->memory_usage : 0;
-	pstat->bo_count = xocl_mm->mm_usage_stat[ddr] ?
-		xocl_mm->mm_usage_stat[ddr]->bo_count : 0;
+	pstat->memory_usage = mm_stat->is_used ? mm_stat->memory_usage : 0;
+	pstat->bo_count = mm_stat->is_used ? mm_stat->bo_count : 0;
 }
 
 void xocl_mm_update_usage_stat(struct xocl_drm *drm_p, u32 ddr,
 	u64 size, int count)
 {
-	struct xocl_mm *xocl_mm = drm_p->xocl_mm;
-	struct drm_xocl_mm_stat *mm_usage_stat = 
-		xocl_mm->mm_usage_stat[ddr];
+	struct drm_xocl_mm_stat *mm_stat = &drm_p->mm_usage_stat[ddr];
 
-	BUG_ON(!xocl_mm && !mm_usage_stat);
+	if (!mm_stat->is_used) {
+        	xocl_err(drm_p->ddev->dev, "Invalid memory %d stats", ddr);
+		return;
+	}
 
-	mm_usage_stat->memory_usage +=
-		(count > 0) ? size : -size;
-	mm_usage_stat->bo_count += count;
+	mm_stat->memory_usage += (count > 0) ? size : -size;
+	mm_stat->bo_count += count;
 }
 
 static int xocl_mm_insert_node_range_all(struct xocl_drm *drm_p, uint32_t *mem_id,
@@ -749,11 +751,11 @@ static int xocl_mm_insert_node_range(struct xocl_drm *drm_p, u32 mem_id,
 	return ret;
 }
 
-int xocl_mm_insert_node(struct xocl_drm *drm_p, unsigned *mem_idx,
-			uint32_t slotidx, struct drm_mm_node *node, u64 size)
+int xocl_mm_insert_node(struct xocl_drm *drm_p, unsigned memidx,
+			uint32_t slotidx, struct drm_xocl_bo *xobj, u64 size)
 {
 	int ret = 0;
-	unsigned memidx = *mem_idx;
+	struct drm_mm_node *node = xobj->mm_node;
 	struct xocl_mem_stat *curr_mem = NULL;
 	struct mem_topology *grp_topology = NULL;
 	
@@ -766,6 +768,10 @@ int xocl_mm_insert_node(struct xocl_drm *drm_p, unsigned *mem_idx,
                 return 0;
 
 	if (grp_topology->m_mem_data[memidx].m_type == MEM_PS_KERNEL) {
+		/* For PS kernel case the memidx is specified will be dummy.
+		 * The memory will be created from the actual Banks. Hence,
+		 * memidx will be updated accordingly.
+		 */
 		ret = xocl_mm_insert_node_range_all(drm_p, &memidx,
 				grp_topology, node, size);
 	}
@@ -788,8 +794,9 @@ int xocl_mm_insert_node(struct xocl_drm *drm_p, unsigned *mem_idx,
 			}
 		}
 	}
+	/* Record the DDR we allocated the buffer on */
+	xobj->mem_idx = memidx;
 
-	*mem_idx = memidx;
         return ret;
 }
 
@@ -914,50 +921,32 @@ int xocl_cleanup_mem_all(struct xocl_drm *drm_p)
 
 static int xocl_cleanup_drm_memory_manager(struct xocl_mm *xocl_mm)
 {
-	int i = 0;
-
 	if (!xocl_mm)
 		return 0;
-
-	for (i = 0; i < xocl_mm->m_count; i++) {
-		if (xocl_mm->mm_usage_stat && xocl_mm->mm_usage_stat[i])
-			vfree(xocl_mm->mm_usage_stat[i]);
-	}
-
-	vfree(xocl_mm->mm_usage_stat);
 
 	if (xocl_mm->bo_usage_stat)
 		vfree(xocl_mm->bo_usage_stat);
 
-	if (xocl_mm->mm)
+	if (xocl_mm->mm) {
+		drm_mm_takedown(xocl_mm->mm);
 		vfree(xocl_mm->mm);
+	}
 
 	vfree(xocl_mm);
 
 	return 0;
 }
 
-static int xocl_init_drm_mm(struct xocl_drm *drm_p, uint64_t mm_start_addr,
-		uint64_t mm_end_addr, uint32_t m_count)
+static int xocl_init_drm_mm(struct xocl_drm *drm_p, struct xocl_mm *xocl_mm,
+		uint64_t mm_start_addr, uint64_t mm_end_addr, uint32_t m_count)
 {
-	struct xocl_mm *xocl_mm = NULL;
-	size_t size = 0;
 	int err = 0;
 	int i = 0;
 	
 	BUG_ON(!mutex_is_locked(&drm_p->mm_lock));
 
-	xocl_mm = vzalloc(sizeof(struct xocl_mm));
-	if (!xocl_mm) {
-		return -ENOMEM;
-	}
-
-	size = m_count * sizeof(void *);
-	xocl_mm->mm_usage_stat = vzalloc(size);
-	if (!xocl_mm->mm_usage_stat) {
-		err = -ENOMEM;
-		goto error;
-	}
+	if (!xocl_mm)
+		return -EINVAL;
 
 	/* Initialize memory status for the memory manager */
 	xocl_mm->bo_usage_stat = vzalloc(XOCL_BO_USAGE_TOTAL *
@@ -967,13 +956,8 @@ static int xocl_init_drm_mm(struct xocl_drm *drm_p, uint64_t mm_start_addr,
 		goto error;
 	}
 
-	for (i = 0; i < m_count; i++) {
-		xocl_mm->mm_usage_stat[i] = vzalloc(sizeof(struct drm_xocl_mm_stat));
-		if (!xocl_mm->mm_usage_stat[i]) {
-			err = -ENOMEM;
-			goto error;
-		}
-	}
+        for (i = 0; i < MAX_MEM_BANK_COUNT; i++)
+		drm_p->mm_usage_stat[i].is_used = false;
 
 	/* Initialize the memory manager */
 	xocl_mm->mm = vzalloc(sizeof(struct drm_mm));
@@ -983,21 +967,12 @@ static int xocl_init_drm_mm(struct xocl_drm *drm_p, uint64_t mm_start_addr,
 	}
 
 	drm_mm_init(xocl_mm->mm, mm_start_addr, (mm_end_addr - mm_start_addr));
-	if (!xocl_mm->mm) {
-		xocl_err(drm_p->ddev->dev,
-				"init memory manager failed");
-		err = -EINVAL;
-		goto error;
-	}
-
 	xocl_mm->start_addr = mm_start_addr;
 	xocl_mm->end_addr = mm_end_addr;
 	xocl_mm->m_count = m_count;
 
 	xocl_info(drm_p->ddev->dev, "drm_mm_init called for the available memory range"
 			" <%llx - %llx>", mm_start_addr, mm_end_addr);
-
-	drm_p->xocl_mm = xocl_mm;
 
 	return 0;
 
@@ -1059,13 +1034,16 @@ static int xocl_init_drm_memory_manager(struct xocl_drm *drm_p)
 
 	if (!xocl_mm->m_count) {
 		mutex_unlock(&drm_p->mm_lock);
+		vfree(xocl_mm);
                 return 0;
 	}
 
-	err = xocl_init_drm_mm(drm_p, mm_start_addr, mm_end_addr,
+	err = xocl_init_drm_mm(drm_p, xocl_mm, mm_start_addr, mm_end_addr,
 			xocl_mm->m_count);
 	if (err)
 		goto error;
+	
+	drm_p->xocl_mm = xocl_mm;
 error:
 	if (err)
 		xocl_cleanup_drm_memory_manager(xocl_mm);
@@ -1076,49 +1054,18 @@ error:
 
 static int xocl_cleanup_memory_manager(struct xocl_drm *drm_p)
 {
-	struct mem_topology *topo = NULL;
 	struct xocl_mm *xocl_mm = NULL;
-	struct mem_data *mem_data = NULL;
 	int err = 0;
-	int i = 0;
 
-	mutex_lock(&drm_p->mm_lock);
+	BUG_ON(!mutex_is_locked(&drm_p->mm_lock));
+
 	xocl_mm = drm_p->xocl_mm;
-	if (!xocl_mm) {
-		mutex_unlock(&drm_p->mm_lock);
+	if (!xocl_mm)
 		return 0;
-	}
 
 	err = xocl_check_topology(drm_p);
-	if (err) {
-		mutex_unlock(&drm_p->mm_lock);
+	if (err)
 		return err;
-	}
-
-	err = XOCL_GET_MEM_TOPOLOGY(drm_p->xdev, topo, DEFAULT_PL_SLOT);
-	if (err) {
-		mutex_unlock(&drm_p->mm_lock);
-		return err;
-	}
-	if (topo) {
-		for (i = 0; i < topo->m_count; i++) {
-			mem_data = &topo->m_mem_data[i];
-			if (XOCL_IS_STREAM(topo, i))
-				continue;
-
-			if (XOCL_IS_PS_KERNEL_MEM(topo, i))
-				continue;
-
-			if (!is_mem_region_valid(drm_p, mem_data))
-				continue;
-
-			if (convert_mem_tag(topo->m_mem_data[i].m_tag) == MEM_TAG_HOST)
-                                xocl_addr_translator_clean(drm_p->xdev);
-
-                        xocl_info(drm_p->ddev->dev, "Taking down DDR : %d", i);
-                }
-        }
-	XOCL_PUT_MEM_TOPOLOGY(drm_p->xdev, DEFAULT_PL_SLOT);
 
 	/* Now cleanup the P2P memory */
         xocl_p2p_mem_cleanup(drm_p->xdev);
@@ -1126,8 +1073,6 @@ static int xocl_cleanup_memory_manager(struct xocl_drm *drm_p)
         /* cleanup the memory manager */
 	xocl_cleanup_drm_memory_manager(xocl_mm);
 	drm_p->xocl_mm = NULL;		
-
-	mutex_unlock(&drm_p->mm_lock);
 
         return 0;
 }
@@ -1143,34 +1088,15 @@ static int xocl_init_memory_manager(struct xocl_drm *drm_p)
 	int i = 0;
 
 	mutex_lock(&drm_p->mm_lock);
-	/* Memory manager initialize should be done only once */
-        if (drm_p->xocl_mm_done) {
-		mutex_unlock(&drm_p->mm_lock);
-                return 0; // Memory manager is already initialized
-	}
-
-        err = xocl_p2p_mem_init(drm_p->xdev);
-        if (err && err != -ENODEV) {
-		mutex_unlock(&drm_p->mm_lock);
-                xocl_err(drm_p->ddev->dev,
-                        "init p2p mem failed, err %d", err);
-                return err;
-        }
-        err = 0;
-
-	err = XOCL_GET_MEM_TOPOLOGY(drm_p->xdev, topo, DEFAULT_PL_SLOT);
+	err = XOCL_GET_MEM_TOPOLOGY(drm_p->xdev, topo);
 	if (err) {
 		mutex_unlock(&drm_p->mm_lock);
 		return err;
 	}
 
-	if (!topo)
-		goto error;
-
 	/* Initialize with max and min possible value */
         mm_start_addr = 0xffffFFFFffffFFFF;
         mm_end_addr = 0;
-	drm_p->cma_bank_idx = -1;
 
         /* Initialize all the banks and their sizes */
         /* Currently only fixed sizes are supported */
@@ -1178,51 +1104,82 @@ static int xocl_init_memory_manager(struct xocl_drm *drm_p)
                 mem_data = &topo->m_mem_data[i];
                 ddr_bank_size = mem_data->m_size * 1024;
 
+		if (!ddr_bank_size)
+			continue;
+
 		if (XOCL_IS_STREAM(topo, i))
                         continue;
 
-                if (XOCL_IS_PS_KERNEL_MEM(topo, i))
-                        continue;
+		if (XOCL_IS_PS_KERNEL_MEM(topo, i))
+			continue;
 
-                if (!is_mem_region_valid(drm_p, mem_data))
-                        continue;
+		if (!is_mem_region_valid(drm_p, mem_data))
+			continue;
 
-                /* Update the start and end address for the memory manager */
-                if (mem_data->m_base_address < mm_start_addr)
-                        mm_start_addr = mem_data->m_base_address;
-                if ((mem_data->m_base_address + ddr_bank_size) > mm_end_addr)
-                        mm_end_addr = mem_data->m_base_address + ddr_bank_size;
+		/* Update the start and end address for the memory manager */
+		if (mem_data->m_base_address < mm_start_addr)
+			mm_start_addr = mem_data->m_base_address;
+		if ((mem_data->m_base_address + ddr_bank_size) > mm_end_addr)
+			mm_end_addr = mem_data->m_base_address + ddr_bank_size;
+	}
 
-		if (convert_mem_tag(mem_data->m_tag) == MEM_TAG_HOST) {
-			drm_p->cma_bank_idx = i;
-			err = xocl_set_cma_bank(drm_p, mem_data->m_base_address, ddr_bank_size);
-			if (err) {
-				xocl_err(drm_p->ddev->dev, 
-					"Run host_mem to setup host memory access, request 0x%lx bytes",
-					ddr_bank_size);
-				goto error;
-			}
+	if (drm_p->xocl_mm_done && (drm_p->xocl_mm != NULL)) {
+		/* Validate the new memory topology with existing memory manager */
+		if ((drm_p->xocl_mm->start_addr != mm_start_addr) ||
+				(drm_p->xocl_mm->end_addr != mm_end_addr) ||
+				(drm_p->xocl_mm->m_count != topo->m_count)) {
+			/* If there is some memory already in use then we can't 
+			 * reinitialize the memory manager. But if no memory is 
+			 * in use then we will be able to reintialize the memory
+			 * manager again with updated topology.
+			 */
+			if(xocl_check_topology(drm_p))
+				err = -EINVAL;
+			else
+				err = -EAGAIN;
+
+			goto error;
+		}
+		else {
+			/* Memory manager initialization is done and consistent */
+			mutex_unlock(&drm_p->mm_lock);
+			return 0;
 		}
 	}
 
 	if (drm_p->xocl_mm == NULL) {
-		err = xocl_init_drm_mm(drm_p, mm_start_addr, mm_end_addr, topo->m_count);
+		drm_p->xocl_mm = vzalloc(sizeof(struct xocl_mm));
+		if (!drm_p->xocl_mm) {
+			err = -ENOMEM;
+			goto error;
+		}
+
+		err = xocl_init_drm_mm(drm_p, drm_p->xocl_mm, mm_start_addr, mm_end_addr,
+				topo->m_count);
 		if (err)
 			goto error;
 	}
 
 	XOCL_PUT_MEM_TOPOLOGY(drm_p->xdev, DEFAULT_PL_SLOT);
-        drm_p->xocl_mm_done = true;
-        mutex_unlock(&drm_p->mm_lock);
+	err = xocl_p2p_mem_init(drm_p->xdev);
+	if (err && err != -ENODEV) {
+		xocl_err(drm_p->ddev->dev,
+				"init p2p mem failed, err %d", err);
+		goto error;
+	}
+
+	drm_p->xocl_mm_done = true;
+	mutex_unlock(&drm_p->mm_lock);
 
 	return 0;
 
 error:
 	XOCL_PUT_MEM_TOPOLOGY(drm_p->xdev, DEFAULT_PL_SLOT);
-	mutex_unlock(&drm_p->mm_lock);
 
 	if (err)
 	       xocl_cleanup_memory_manager(drm_p);	
+	
+	mutex_unlock(&drm_p->mm_lock);
 
 	return err;
 }
@@ -1249,11 +1206,21 @@ int xocl_init_mem(struct xocl_drm *drm_p, uint32_t slot_id)
 	/* Initialize the memory manager  */
 	err = xocl_init_memory_manager(drm_p);
 	if (err) {
-		xocl_xdev_err(drm_p->ddev->dev, "Memory Initialize failed 0x%x", err);
-		return err;
+
+		/* If mem topology is not consistent then reintialize it 
+		 * again with the updated memory topology.
+		 */
+		if (err == -EAGAIN) 
+			err = xocl_init_memory_manager(drm_p);
+
+		if (err) {
+			xocl_xdev_err(drm_p->ddev->dev, "Memory Initialize failed 0x%x", err);
+			return err;
+		}
 	}
 
 	mutex_lock(&drm_p->mm_lock);
+	drm_p->cma_bank_idx = -1;
 
 	/* Initialize memory stats based on Group topology for this xclbin */
 	err = XOCL_GET_GROUP_TOPOLOGY(drm_p->xdev, group_topo, slot_id);
@@ -1298,7 +1265,18 @@ int xocl_init_mem(struct xocl_drm *drm_p, uint32_t slot_id)
 		xocl_info(drm_p->ddev->dev, "   Initializing Memory Bank: %s", mem_data->m_tag);
 		xocl_info(drm_p->ddev->dev, "    base_addr:0x%llx, total size:0x%lx",
 			mem_data->m_base_address, ddr_bank_size);
-		
+	
+		if (convert_mem_tag(mem_data->m_tag) == MEM_TAG_HOST) {
+			drm_p->cma_bank_idx = i;
+			err = xocl_set_cma_bank(drm_p, mem_data->m_base_address, ddr_bank_size);
+			if (err) {
+				xocl_err(drm_p->ddev->dev, 
+					"Run host_mem to setup host memory access, request 0x%lx bytes",
+					ddr_bank_size);
+				goto done;
+			}
+		}
+	
 		if (XOCL_DSA_IS_MPSOC(drm_p->xdev)) {
 			reserved_end = mem_data->m_base_address + ddr_bank_size;
 			reserved_start = reserved_end - reserved1 - reserved2;
@@ -1315,6 +1293,7 @@ int xocl_init_mem(struct xocl_drm *drm_p, uint32_t slot_id)
 		mem_stat->mem_idx = i;
 		mem_stat->slot_idx = 0; // Default slot id
 		list_add_tail(&mem_stat->link, &drm_p->mem_list_head);
+		drm_p->mm_usage_stat[i].is_used = true;
 	}
 
 done:
