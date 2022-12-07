@@ -1344,7 +1344,7 @@ int shim::xclPrepareAxlf(const axlf *buffer, struct drm_xocl_axlf *axlf_obj)
     auto kernels = xrt_core::xclbin::get_kernels(buffer);
     /* Calculate size of kernels */
     for (auto& kernel : kernels) {
-        axlf_obj->ksize += sizeof(kernel_info) + sizeof(argument_info) * kernel.args.size();
+        axlf_obj->ksize += sizeof(kernel_info) + (sizeof(argument_info) * kernel.args.size());
     }
 
     /* To enhance CU subdevice and KDS/ERT, driver needs all details about kernels
