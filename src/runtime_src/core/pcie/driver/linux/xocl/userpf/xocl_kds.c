@@ -218,6 +218,7 @@ static int xocl_add_context(struct xocl_dev *xdev, struct kds_client *client,
 	uint32_t slot_id = 0;
 	struct kds_client_cu_ctx *cu_ctx = NULL;
 	struct kds_client_cu_info cu_info = {};
+	struct kds_client_hw_ctx *hw_ctx = NULL;
 	bool bitstream_locked = false;
 	int ret;
 
@@ -278,6 +279,14 @@ static int xocl_add_context(struct xocl_dev *xdev, struct kds_client *client,
 		ret = -EINVAL;
 		goto out1;
 	}
+
+	/* For legacy context there is only one active hw context possible */
+	hw_ctx = kds_get_hw_ctx_by_id(client, client->next_hw_ctx_id);
+	if (!hw_ctx) {
+		userpf_err(xdev, "No valid HW context is open");
+		goto out_cu_ctx;
+	}
+
 	cu_ctx->hw_ctx = hw_ctx;
 
 	ret = kds_add_context(&XDEV(xdev)->kds, client, cu_ctx);

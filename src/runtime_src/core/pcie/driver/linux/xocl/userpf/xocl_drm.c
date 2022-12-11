@@ -54,7 +54,7 @@
 
 static char driver_date[9];
 
-int xocl_cleanup_mem_nolock(struct xocl_drm *drm_p);
+static int xocl_cleanup_mem_nolock(struct xocl_drm *drm_p, uint32_t slot_id);
 static int xocl_cleanup_memory_manager(struct xocl_drm *drm_p);
 static int xocl_init_drm_memory_manager(struct xocl_drm *drm_p);
 
@@ -656,7 +656,7 @@ void xocl_drm_fini(struct xocl_drm *drm_p)
 	xocl_drvinst_release(drm_p, &hdl);
 
 	mutex_lock(&drm_p->mm_lock);
-	xocl_cleanup_mem_nolock(drm_p);
+	xocl_cleanup_mem_all(drm_p);
 	xocl_cleanup_memory_manager(drm_p);
 	mutex_unlock(&drm_p->mm_lock);
 	
@@ -767,7 +767,7 @@ int xocl_mm_insert_node(struct xocl_drm *drm_p, unsigned memidx,
         if (drm_p->xocl_mm->mm == NULL)
                 return -EINVAL;
 
-	ret = XOCL_GET_GROUP_TOPOLOGY(drm_p->xdev, grp_topology);
+	ret = XOCL_GET_GROUP_TOPOLOGY(drm_p->xdev, grp_topology, slotidx);
         if (ret)
                 return 0;
 
@@ -845,25 +845,7 @@ int xocl_check_topology(struct xocl_drm *drm_p)
 	return err;
 }
 
-int xocl_check_topology(struct xocl_drm *drm_p)
-{
-	int err = 0;
-	uint32_t slot_id = 0;
-
-	if (list_empty(&drm_p->mem_list_head))
-		return 0;
-
-	for (slot_id = 0; slot_id < MAX_SLOT_SUPPORT; slot_id++) {
-		err = xocl_check_slot_topology(drm_p, slot_id);
-		if (err)
-			break;
-	}
-
-	return err;
-}
-
-
-int xocl_cleanup_mem_nolock(struct xocl_drm *drm_p, uint32_t slot_id)
+static int xocl_cleanup_mem_nolock(struct xocl_drm *drm_p, uint32_t slot_id)
 {
 	int err = 0;
 	struct xocl_mem_stat *curr_mem = NULL;
@@ -1109,7 +1091,7 @@ static int xocl_init_memory_manager(struct xocl_drm *drm_p)
 	int i = 0;
 
 	mutex_lock(&drm_p->mm_lock);
-	err = XOCL_GET_MEM_TOPOLOGY(drm_p->xdev, topo);
+	err = XOCL_GET_MEM_TOPOLOGY(drm_p->xdev, topo, DEFAULT_PL_SLOT);
 	if (err) {
 		mutex_unlock(&drm_p->mm_lock);
 		return err;
@@ -1181,7 +1163,7 @@ static int xocl_init_memory_manager(struct xocl_drm *drm_p)
 			goto error;
 	}
 
-	XOCL_PUT_MEM_TOPOLOGY(drm_p->xdev);
+	XOCL_PUT_MEM_TOPOLOGY(drm_p->xdev, DEFAULT_PL_SLOT);
 
 	err = xocl_p2p_mem_init(drm_p->xdev);
 	if (err && err != -ENODEV) {
@@ -1196,7 +1178,7 @@ static int xocl_init_memory_manager(struct xocl_drm *drm_p)
 	return 0;
 
 error:
-	XOCL_PUT_MEM_TOPOLOGY(drm_p->xdev);
+	XOCL_PUT_MEM_TOPOLOGY(drm_p->xdev, DEFAULT_PL_SLOT);
 	if (err)
 	       xocl_cleanup_memory_manager(drm_p);	
 	

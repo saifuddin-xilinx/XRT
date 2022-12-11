@@ -132,7 +132,6 @@ static ssize_t kdsstat_show(struct device *dev,
 }
 static DEVICE_ATTR_RO(kdsstat);
 
-//SAIF TODO FIXME 
 /* -live memory usage-- */
 static ssize_t xocl_mm_stat(struct xocl_dev *xdev, char *buf, bool raw)
 {
@@ -150,7 +149,7 @@ static ssize_t xocl_mm_stat(struct xocl_dev *xdev, char *buf, bool raw)
 
 	mutex_lock(&xdev->dev_lock);
 
-	err = XOCL_GET_GROUP_TOPOLOGY(xdev, topo);
+	err = XOCL_GET_MEM_TOPOLOGY(xdev, topo, DEFAULT_PL_SLOT);
 	if (err) {
 		mutex_unlock(&xdev->dev_lock);
 		return err;
@@ -222,7 +221,7 @@ static ssize_t xocl_mm_stat(struct xocl_dev *xdev, char *buf, bool raw)
 	}
 
 done:
-	XOCL_PUT_GROUP_TOPOLOGY(xdev);
+	XOCL_PUT_MEM_TOPOLOGY(xdev, DEFAULT_PL_SLOT);
 	mutex_unlock(&xdev->dev_lock);
 	return size;
 }

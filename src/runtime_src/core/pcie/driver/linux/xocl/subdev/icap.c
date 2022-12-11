@@ -2026,17 +2026,7 @@ static int __icap_peer_xclbin_download(struct icap *icap, struct axlf *xclbin, u
 
 	BUG_ON(!mutex_is_locked(&icap->icap_lock));
 
-	/* Optimization for transferring entire xclbin thru mailbox. */
-	peer_uuid = (xuid_t *)icap_get_data_nolock(icap->icap_pdev, PEER_UUID);
-	if (uuid_equal(peer_uuid, &xclbin->m_header.uuid)) {
-		if (force_download) {
-			ICAP_INFO(icap, "%s Force xclbin download", __func__);
-		} else {
-		        ICAP_INFO(icap, "xclbin already on peer, skip downloading");
-		        return 0;
-		}
-	}
-
+	/* We need to always download the xclbin at this point */
 	/* Check icap version before transfer xclbin thru mailbox. */
 	icap_ver = icap_multislot_version_from_peer(icap->icap_pdev);
 
