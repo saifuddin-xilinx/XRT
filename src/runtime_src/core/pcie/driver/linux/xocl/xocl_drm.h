@@ -63,8 +63,8 @@ struct xocl_mm {
 	uint64_t		end_addr;
 	uint32_t                m_count;
 
-	/* Array of bo  stats 
-	 * for whole device memory manager */
+        /* Array of bo stats
+         * for whole device memory manager */
 	struct drm_xocl_mm_stat *bo_usage_stat;
 };
 
