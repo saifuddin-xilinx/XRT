@@ -72,6 +72,14 @@ enum zocl_mem_type {
 	ZOCL_MEM_TYPE_STREAMING		= 2,
 };
 
+/* Possible slots Types for ZOCL */
+enum zocl_slot_type {
+	ZOCL_FULL_XCLBIN_SLOT		= 0,
+	ZOCL_PL_ONLY_XCLBIN_SLOT	= 1,
+	ZOCL_AIE_ONLY_XCLBIN_SLOT	= 2,
+	ZOCL_PS_ONLY_XCLBIN_SLOT	= 3
+};
+
 /*
  * Memory structure in zocl driver. There will be an array of this
  * structure where each element is representing each section in

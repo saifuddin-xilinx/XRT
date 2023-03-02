@@ -170,7 +170,7 @@ static int zocl_pr_slot_init(struct drm_zocl_dev *zdev,
 
 		zocl_slot->partial_overlay_id = -1;
 		zocl_slot->slot_idx = i;
-		zocl_slot->slot_type = DOMAIN_PL;
+		zocl_slot->slot_type = ZOCL_FULL_XCLBIN_SLOT;
 
 		zdev->pr_slot[i] = zocl_slot;
 	}
@@ -189,7 +189,7 @@ static int zocl_pr_slot_init(struct drm_zocl_dev *zdev,
 		mutex_init(&zocl_slot->slot_xclbin_lock);
 
 		zocl_slot->slot_idx = i;
-		zocl_slot->slot_type = DOMAIN_PS;
+		zocl_slot->slot_type = ZOCL_PS_ONLY_XCLBIN_SLOT;
 
 		zdev->pr_slot[i] = zocl_slot;
 	}
