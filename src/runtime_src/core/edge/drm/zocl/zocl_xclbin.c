@@ -1015,8 +1015,89 @@ zocl_load_aie_only_pdi(struct drm_zocl_dev *zdev, struct axlf *axlf,
 int
 zocl_pl_only_reset(struct drm_zocl_dev *zdev, const char *buf, size_t count)
 {
-	/* TODO */
-	DRM_ERROR("%s PL Reset support doesn't added yet", __func__);
+	const struct list_head *ptr = NULL;
+	struct drm_zocl_slot *slot = zdev->pr_slot[ZOCL_DEFAULT_XCLBIN_SLOT];
+	struct kds_sched *kds = NULL;
+	struct kds_client *client = NULL;
+	struct kds_client_ctx *curr = NULL;
+	struct kds_client_ctx *tmp = NULL;
+	void __iomem *map = NULL;
+	int ret = 0;
+
+	printk("*************** %s %d ****************\n", __func__, __LINE__);
+	if (!slot)
+	       return count;
+
+	printk("*************** %s %d ****************\n", __func__, __LINE__);
+	if (slot->xclbin_type == ZOCL_XCLBIN_TYPE_FULL) {
+		printk("ERROR slot->xclbin_type %d\n", slot->xclbin_type);
+		return count;
+	}
+
+	printk("*************** %s %d ****************\n", __func__, __LINE__);
+#define PL_RESET_ADDRESS		0x00F1260330
+#define PL_HOLD_VAL			0xF
+#define PL_RELEASE_VAL			0x0
+#define PL_RESET_ALLIGN_SIZE		_4KB
+	map = ioremap(PL_RESET_ADDRESS, PL_RESET_ALLIGN_SIZE);
+	if (IS_ERR_OR_NULL(map)) {
+		DRM_ERROR("ioremap PL Reset address 0x%lx failed",
+			  PL_RESET_ADDRESS);
+		return -EFAULT;
+	}
+
+	printk("*************** %s %d ****************\n", __func__, __LINE__);
+	mutex_lock(&slot->slot_xclbin_lock);
+	kds = &zdev->kds;
+
+	printk("*************** %s %d ****************\n", __func__, __LINE__);
+	/* Find out number of active client and free all the context
+	 * associated with it
+	 */
+	printk("*************** %s %d ****************\n", __func__, __LINE__);
+	list_for_each(ptr, &kds->clients) {
+		client = list_entry(ptr, struct kds_client, link);
+		kds_fini_client(kds, client);
+		printk("*************** %s %d ****************\n", __func__, __LINE__);
+
+		/* Delete all the existing context associated to this device for this
+		 * client.
+		 */
+		list_for_each_entry_safe(curr, tmp, &client->ctx_list, link) {
+			if (!zocl_xclbin_same_uuid(slot, curr->xclbin_id))
+				continue;
+
+			printk("*************** %s %d ****************\n", __func__, __LINE__);
+			/* Unlock this slot specific xclbin */
+			zocl_unlock_bitstream(slot, curr->xclbin_id);
+			vfree(curr->xclbin_id);
+			list_del(&curr->link);
+			vfree(curr);
+			printk("*************** %s %d ****************\n", __func__, __LINE__);
+		}
+
+		printk("*************** %s %d ****************\n", __func__, __LINE__);
+	}
+
+	printk("*************** %s %d ****************\n", __func__, __LINE__);
+	/* Cleanup the xclbin and destroy the CUs for this slot. */
+	zocl_xclbin_fini(zdev, slot);
+
+	printk("*************** %s %d ****************\n", __func__, __LINE__);
+	mutex_unlock(&slot->slot_xclbin_lock);
+	mutex_destroy(&slot->slot_xclbin_lock);
+	printk("*************** %s %d ****************\n", __func__, __LINE__);
+
+	/* Hold PL in reset status */
+	iowrite32(PL_HOLD_VAL, map);
+	/* Release PL reset status */
+	iowrite32(PL_RELEASE_VAL, map);
+
+	printk("*************** %s %d ****************\n", __func__, __LINE__);
+	iounmap(map);
+
+	DRM_INFO("PL reset successfully finished.");
+
 	return count;
 }
 
@@ -1300,6 +1381,8 @@ zocl_resolver(struct drm_zocl_dev *zdev, struct axlf *axlf, xuid_t *xclbin_id,
 			zocl_xclbin_type = ZOCL_XCLBIN_TYPE_PL_ONLY;
 		else
 			zocl_xclbin_type = ZOCL_XCLBIN_TYPE_FULL;
+
+		printk("******************** zocl_xclbin_type %d\n", zocl_xclbin_type);
 	}
 
 	slot = zdev->pr_slot[s_id];
@@ -1310,6 +1393,7 @@ zocl_resolver(struct drm_zocl_dev *zdev, struct axlf *axlf, xuid_t *xclbin_id,
 
 	mutex_lock(&slot->slot_xclbin_lock);
 	slot->xclbin_type = zocl_xclbin_type;
+	DRM_INFO("Slot[%d] loaded XCLBIN type %d\n", s_id, zocl_xclbin_type);
 	if (zocl_xclbin_same_uuid(slot, xclbin_id)) {
 		if (qos & DRM_ZOCL_FORCE_PROGRAM) {
 			// We come here if user sets force_xclbin_program
