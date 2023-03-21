@@ -426,11 +426,7 @@ pl_only_reset_store(struct device *dev, struct device_attribute *da,
 	if (kstrtou32(buf, 10, &val) < 0 || val != 1)
 		return -EINVAL;
 
-	write_lock(&zdev->attr_rwlock);
-	count = zocl_pl_only_reset(zdev, buf, count);
-	write_unlock(&zdev->attr_rwlock);
-
-	return count;
+	return zocl_pl_only_reset(zdev, buf, count);
 }
 static DEVICE_ATTR_WO(pl_only_reset);
 
@@ -470,17 +466,13 @@ static ssize_t read_debug_ip_layout(struct file *filp, struct kobject *kobj,
 	read_lock(&zdev->attr_rwlock);
 
 	for (i = 0; i < MAX_PR_SLOT_NUM; i++) {
-		printk("**************** %s %d : i %d\n", __func__, __LINE__, i);
 		zocl_slot = zdev->pr_slot[i];
-		printk("%s %d : i %d : zocl_slot %p \n", __func__, __LINE__, i, zocl_slot);
 		if (!zocl_slot || !zocl_slot->debug_ip)
 			continue;
 
-		printk("%s %d : i %d : debug ip %p \n", __func__, __LINE__, i, zocl_slot->debug_ip);
 		if(!zocl_slot->debug_ip)
 			continue;
 
-		printk("%s %d : i %d : debug ip %p \n", __func__, __LINE__, i, zocl_slot->debug_ip);
 		size = sizeof_section(zocl_slot->debug_ip, m_debug_ip_data);
 		if (off >= size) {
 			read_unlock(&zdev->attr_rwlock);

@@ -1057,7 +1057,7 @@ zocl_pl_only_reset(struct drm_zocl_dev *zdev, const char *buf, size_t count)
 	printk("*************** %s %d ****************\n", __func__, __LINE__);
 	list_for_each(ptr, &kds->clients) {
 		client = list_entry(ptr, struct kds_client, link);
-		kds_fini_client(kds, client);
+		kds_fini_pl_only_client(kds, client);
 		printk("*************** %s %d ****************\n", __func__, __LINE__);
 
 		/* Delete all the existing context associated to this device for this
@@ -1069,7 +1069,7 @@ zocl_pl_only_reset(struct drm_zocl_dev *zdev, const char *buf, size_t count)
 
 			printk("*************** %s %d ****************\n", __func__, __LINE__);
 			/* Unlock this slot specific xclbin */
-			zocl_unlock_bitstream(slot, curr->xclbin_id);
+			zocl_xclbin_release(slot, curr->xclbin_id);
 			vfree(curr->xclbin_id);
 			list_del(&curr->link);
 			vfree(curr);
@@ -1080,20 +1080,23 @@ zocl_pl_only_reset(struct drm_zocl_dev *zdev, const char *buf, size_t count)
 	}
 
 	printk("*************** %s %d ****************\n", __func__, __LINE__);
-	/* Cleanup the xclbin and destroy the CUs for this slot. */
+
+	/* Free sections before load the new xclbin */
+	zocl_free_sections(zdev, slot);
+
+	/* Cleanup the slot and delete CU devices if exist for this slot */
 	zocl_xclbin_fini(zdev, slot);
+
+	zocl_xclbin_init(slot);
 
 	printk("*************** %s %d ****************\n", __func__, __LINE__);
 	mutex_unlock(&slot->slot_xclbin_lock);
-	mutex_destroy(&slot->slot_xclbin_lock);
-	printk("*************** %s %d ****************\n", __func__, __LINE__);
 
 	/* Hold PL in reset status */
 	iowrite32(PL_HOLD_VAL, map);
 	/* Release PL reset status */
 	iowrite32(PL_RELEASE_VAL, map);
 
-	printk("*************** %s %d ****************\n", __func__, __LINE__);
 	iounmap(map);
 
 	DRM_INFO("PL reset successfully finished.");
@@ -1382,7 +1385,6 @@ zocl_resolver(struct drm_zocl_dev *zdev, struct axlf *axlf, xuid_t *xclbin_id,
 		else
 			zocl_xclbin_type = ZOCL_XCLBIN_TYPE_FULL;
 
-		printk("******************** zocl_xclbin_type %d\n", zocl_xclbin_type);
 	}
 
 	slot = zdev->pr_slot[s_id];
