@@ -1154,6 +1154,26 @@ create_hw_context(const xrt::uuid& xclbin_uuid,
   return std::make_unique<hwcontext>(this, 0, xclbin_uuid, mode);
 }
 
+void
+shim::
+destroy_hw_context(xrt_core::hwctx_handle::slot_id slot)
+{
+    drm_zocl_destroy_hw_ctx hw_ctx = {};
+    hw_ctx.hw_context = slot;
+
+    auto ret = ioctl(mKernelFD, DRM_IOCTL_ZOCL_DESTROY_HW_CTX, &hw_ctx);
+    if (ret)
+      throw xrt_core::system_error(errno, "Destroying hw context failed");
+}
+
+// Registers an xclbin, but does not load it.
+void
+shim::
+register_xclbin(const xrt::xclbin&)
+{
+  xclLog(XRT_INFO, "%s: XCLBIN successfully registered for this device", __func__);
+}
+
 int
 shim::
 xclCloseContext(const uuid_t xclbinId, unsigned int ipIndex)
@@ -1873,6 +1893,13 @@ create_hw_context(xclDeviceHandle handle,
 {
   auto shim = get_shim_object(handle);
   return shim->create_hw_context(xclbin_uuid, cfg_param, mode);
+}
+
+void
+register_xclbin(xclDeviceHandle handle, const xrt::xclbin& xclbin)
+{
+  auto shim = get_shim_object(handle);
+  shim->register_xclbin(xclbin);
 }
 
 std::unique_ptr<xrt_core::buffer_handle>

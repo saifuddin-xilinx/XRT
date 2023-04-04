@@ -165,11 +165,21 @@ public:
 
   public:
     hwcontext(shim* shim, slot_id slotidx, xrt::uuid uuid, xrt::hw_context::access_mode mode)
-      : m_shim(shim)
-      , m_uuid(std::move(uuid))
-      , m_slotidx(slotidx)
-      , m_mode(mode)
+	    : m_shim(shim)
+	      , m_uuid(std::move(uuid))
+	      , m_slotidx(slotidx)
+	      , m_mode(mode)
     {}
+
+    ~hwcontext()
+    {
+      try {
+        m_shim->destroy_hw_context(m_slotidx);
+      }
+      catch (const std::exception& ex) {
+        xrt_core::send_exception_message(ex.what());
+      }
+    }
 
     void
     update_access_mode(access_mode mode) override
@@ -285,6 +295,14 @@ public:
 
   std::unique_ptr<xrt_core::hwctx_handle>
   create_hw_context(const xrt::uuid&, const xrt::hw_context::cfg_param_type&, xrt::hw_context::access_mode);
+
+  void
+  destroy_hw_context(xrt_core::hwctx_handle::slot_id slotidx);
+
+  // Registers an xclbin, but does not load it.
+  void
+  register_xclbin(const xrt::xclbin&);
+
 ////////////////////////////////////////////////////////////////
 
   int xclOpenContext(const uuid_t xclbinId, unsigned int ipIndex, bool shared);

@@ -59,6 +59,15 @@
  *      (experimental)
  * 15   Get Information about Compute Unit     DRM_IOCTL_ZOCL_INFO_CU         drm_zocl_info_cu
  *      (experimental)
+ * 16	Create a hw context for a specific     DRM_IOCTL_ZOCL_CREATE_HW_CTX   drm_zocl_create_hw_ctx
+ *      xclbin image
+ * 17	Destroy a specific hw context	       DRM_IOCTL_ZOCL_DESTROY_HW_CTX   drm_zocl_destroy_hw_ctx
+ * 18	Open a cu context for a specific       DRM_IOCTL_ZOCL_OPEN_CU_CTX      drm_zocl_open_cu_ctx
+ *      hw context
+ * 19   Close a cu context for a specific      DRM_IOCTL_ZOCL_CLOSE_CU_CTX     drm_zocl_close_cu_ctx
+ *      hw context
+ * 20   Send an execute job to a compute unit  DRM_IOCTL_ZOCL_HW_CTX_EXECBUF   drm_zocl_hw_ctx_execbuf
+ *      under a hw context
  *
  * ==== ====================================== ============================== ==================================
  */
@@ -73,6 +82,8 @@
 #else
 #include <uapi/drm/drm_mode.h>
 #endif /* !__KERNEL__ */
+
+#include "zynq_hwctx.h"
 
 /*
  * enum drm_zocl_ops - ioctl command code enumerations
@@ -110,6 +121,16 @@ enum drm_zocl_ops {
 	DRM_ZOCL_INFO_CU,
 	/* Open/Close context */
 	DRM_ZOCL_CTX,
+	/* Create hw context */
+	DRM_ZOCL_CREATE_HW_CTX,
+	/* Destroy hw context */
+	DRM_ZOCL_DESTROY_HW_CTX,
+	/* Open cu context under a hw context */
+	DRM_ZOCL_OPEN_CU_CTX,
+	/* Close a cu context under a hw context */
+	DRM_ZOCL_CLOSE_CU_CTX,
+	/* Program the Device with specific hw context */
+	DRM_ZOCL_HW_CTX_EXECBUF,
 	/* Error injection */
 	DRM_ZOCL_ERROR_INJECT,
 	/* Request/Release AIE partition */
@@ -579,6 +600,16 @@ struct drm_zocl_error_inject {
                                        DRM_ZOCL_INFO_CU, struct drm_zocl_info_cu)
 #define DRM_IOCTL_ZOCL_CTX             DRM_IOWR(DRM_COMMAND_BASE + \
                                        DRM_ZOCL_CTX, struct drm_zocl_ctx)
+#define DRM_IOCTL_ZOCL_CREATE_HW_CTX   DRM_IOWR(DRM_COMMAND_BASE + \
+                                       DRM_ZOCL_CREATE_HW_CTX, struct drm_zocl_create_hw_ctx)
+#define DRM_IOCTL_ZOCL_DESTROY_HW_CTX  DRM_IOWR(DRM_COMMAND_BASE + \
+                                       DRM_ZOCL_DESTROY_HW_CTX, struct drm_zocl_destroy_hw_ctx)
+#define DRM_IOCTL_ZOCL_OPEN_CU_CTX     DRM_IOWR(DRM_COMMAND_BASE + \
+                                       DRM_ZOCL_OPEN_CU_CTX, struct drm_zocl_open_cu_ctx)
+#define DRM_IOCTL_ZOCL_CLOSE_CU_CTX    DRM_IOWR(DRM_COMMAND_BASE + \
+                                       DRM_ZOCL_CLOSE_CU_CTX, struct drm_zocl_close_cu_ctx)
+#define DRM_IOCTL_ZOCL_HW_CTX_EXECBUF  DRM_IOWR(DRM_COMMAND_BASE + \
+                                       DRM_ZOCL_HW_CTX_EXECBUF, struct drm_zocl_hw_ctx_execbuf)
 #define DRM_IOCTL_ZOCL_ERROR_INJECT    DRM_IOWR(DRM_COMMAND_BASE + \
                                        DRM_ZOCL_ERROR_INJECT, struct drm_zocl_error_inject)
 #define DRM_IOCTL_ZOCL_AIE_FD          DRM_IOWR(DRM_COMMAND_BASE + \
