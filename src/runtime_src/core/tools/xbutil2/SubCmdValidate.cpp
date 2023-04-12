@@ -283,7 +283,7 @@ runTestCase( const std::shared_ptr<xrt_core::device>& _dev, const std::string& p
       { "versal_23_bandwidth.py",   "kernel_bw.exe"   },
       { "host_mem_23_bandwidth.py", "hostmemory.exe"  },
       { "xcl_vcu_test.exe",         "xcl_vcu_test.exe"},
-      { "xcl_iops_test.exe",        "xcl_iops_test.exe"},
+      { "xrt_iops_test.exe",        "xrt_iops_test.exe"},
       { "aie_pl.exe",               "aie_pl.exe"}
     };
 
@@ -384,7 +384,7 @@ runTestCase( const std::shared_ptr<xrt_core::device>& _dev, const std::string& p
     }
   }
 
-  if (py.compare("xcl_iops_test.exe") == 0) {
+  if (py.compare("xrt_iops_test.exe") == 0) {
     auto st = os_stdout.str().find("IOPS:");
     if (st != std::string::npos) {
       size_t end = os_stdout.str().find("\n", st);
@@ -1236,7 +1236,7 @@ vcuKernelTest(const std::shared_ptr<xrt_core::device>& _dev, boost::property_tre
 void
 iopsTest(const std::shared_ptr<xrt_core::device>& _dev, boost::property_tree::ptree& _ptTest)
 {
-    runTestCase(_dev, "xcl_iops_test.exe", _ptTest.get<std::string>("xclbin"), _ptTest);
+    runTestCase(_dev, "xrt_iops_test.exe", _ptTest.get<std::string>("xclbin"), _ptTest);
 }
 
 /*

@@ -30,7 +30,7 @@ struct krnl_info {
 
 bool verbose = false;
 barrier barrier;
-struct krnl_info krnl = {"hello", false};
+struct krnl_info krnl = {"verify", false};
 
 static void usage(const char *prog)
 {
@@ -154,6 +154,7 @@ int _main(int argc, char* argv[])
 
   // Switches
   //**************//"<Full Arg>",  "<Short Arg>", "<Description>", "<Default>"
+  parser.addSwitch("--path",    "-p", "test xclbin path", "");
   parser.addSwitch("--kernel",  "-k", "kernel (imply old style verify.xclbin is used)", "");
   parser.addSwitch("--device",  "-d", "device id", "0");
   parser.addSwitch("--threads", "-t", "number of threads", "2");
@@ -169,7 +170,8 @@ int _main(int argc, char* argv[])
   int total = parser.value_to_int("total");
   std::string xclbin_fn = parser.value("kernel");
   if (xclbin_fn.empty()) {
-      std::string test_path = argv[1];
+      std::string test_path = parser.value("path");
+      //std::string test_path = argv[1];
       xclbin_fn = test_path + "/verify.xclbin";
       krnl.name = "verify";
       krnl.new_style = true;
