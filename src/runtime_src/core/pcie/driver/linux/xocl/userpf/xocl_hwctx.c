@@ -50,7 +50,7 @@ int xocl_create_hw_context(struct xocl_dev *xdev, struct drm_file *filp,
 
 	mutex_lock(&client->lock);
 
-	hw_ctx = kds_alloc_hw_ctx(client, xclbin_id, slot_id);
+	hw_ctx = kds_alloc_hw_ctx(client, xclbin_id, slot_id, false);
 	if (!hw_ctx) {
 		ret = -EINVAL;
 		goto error_out;

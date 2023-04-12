@@ -224,8 +224,7 @@ static int xocl_add_context(struct xocl_dev *xdev, struct kds_client *client,
 		 * For legacy context case assume there is only one hw context present
 		 * of id 0.
 		 */
-		client->next_hw_ctx_id = 0;
-		hw_ctx = kds_alloc_hw_ctx(client, uuid, slot_id);
+		hw_ctx = kds_alloc_hw_ctx(client, uuid, slot_id, true);
 		if (!hw_ctx) {
 			ret = -EINVAL;
 			goto out1;

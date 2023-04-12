@@ -921,8 +921,8 @@ int kds_open_ucu(struct kds_sched *kds, struct kds_client *client, u32 cu_idx)
 	 * of id 0.
 	 */
 	mutex_lock(&client->lock);
-	client->next_hw_ctx_id = 0;
-	hw_ctx = kds_alloc_hw_ctx(client, NULL /* xclbin id*/, 0 /*slot id */);
+	hw_ctx = kds_alloc_hw_ctx(client, NULL /* xclbin id*/, 0 /*slot id */,
+				  true);
 	mutex_unlock(&client->lock);
 	if (!hw_ctx) {
 		return -EINVAL;
@@ -1102,6 +1102,7 @@ int kds_init_client(struct kds_sched *kds, struct kds_client *client)
 	}
 
 	client->pid = get_pid(task_pid(current));
+	client->next_hw_ctx_id = STARTING_HW_CTX_ID;
 	mutex_init(&client->lock);
 	mutex_init(&client->refcnt->lock);
 	init_waitqueue_head(&client->waitq);

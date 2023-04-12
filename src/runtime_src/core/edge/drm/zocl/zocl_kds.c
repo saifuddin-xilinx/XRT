@@ -206,8 +206,7 @@ zocl_create_client_context(struct drm_zocl_dev *zdev,
 	 * for this case zocl hw context is not required. This is only for
 	 * backward compartability.
 	 */
-	client->next_hw_ctx_id = 0;
-	hw_ctx = kds_alloc_hw_ctx(client, cctx->xclbin_id, 0 /*slot id */);
+	hw_ctx = kds_alloc_hw_ctx(client, cctx->xclbin_id, 0 /*slot id */, true);
 	if (!hw_ctx) {
 		vfree(cctx->xclbin_id);
 		vfree(cctx);
@@ -369,8 +368,7 @@ int zocl_add_context_kernel(struct drm_zocl_dev *zdev, void *client_hdl,
 		 * for this case zocl hw context is not required. This is only for
 		 * backward compartability.
 		 */
-		client->next_hw_ctx_id = 0;
-		hw_ctx = kds_alloc_hw_ctx(client, cctx->xclbin_id, 0 /*slot id */);
+		hw_ctx = kds_alloc_hw_ctx(client, cctx->xclbin_id, 0 /*slot id */, true);
 		if (!hw_ctx) {
 			vfree(cctx->xclbin_id);
 			vfree(cctx);

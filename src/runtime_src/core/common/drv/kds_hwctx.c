@@ -363,7 +363,8 @@ kds_get_hw_ctx_by_id(struct kds_client *client, uint32_t hw_ctx_id)
 }
 
 struct kds_client_hw_ctx *
-kds_alloc_hw_ctx(struct kds_client *client, uuid_t *xclbin_id, uint32_t slot_id)
+kds_alloc_hw_ctx(struct kds_client *client, uuid_t *xclbin_id, uint32_t slot_id,
+			bool is_legacy_ctx)
 {
         struct kds_client_hw_ctx *hw_ctx = NULL;
 
@@ -384,13 +385,16 @@ kds_alloc_hw_ctx(struct kds_client *client, uuid_t *xclbin_id, uint32_t slot_id)
 	}
 
 	/* Initialize the hw context here */
-	hw_ctx->hw_ctx_idx = client->next_hw_ctx_id;
+	if (is_legacy_ctx)
+		hw_ctx->hw_ctx_idx = DEFAULT_HW_CTX_ID;
+	else {
+		hw_ctx->hw_ctx_idx = client->next_hw_ctx_id;
+		++client->next_hw_ctx_id;
+	}
 	hw_ctx->slot_idx = slot_id;
 	hw_ctx->xclbin_id = xclbin_id;
 	INIT_LIST_HEAD(&hw_ctx->cu_ctx_list);
         list_add_tail(&hw_ctx->link, &client->hw_ctx_list);
-
-	++client->next_hw_ctx_id;
 
         return hw_ctx;
 }
