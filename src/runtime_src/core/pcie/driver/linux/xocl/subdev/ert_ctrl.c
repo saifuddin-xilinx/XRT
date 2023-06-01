@@ -568,7 +568,7 @@ static void ert_ctrl_unset_xgq(struct platform_device *pdev, void *xgq_handle)
 		xocl_user_interrupt_reg(xdev, xgq_ips->ecxc_xgq_irq, NULL, NULL);
 	}
 
-	if (!ec->ec_exgq[xgq_id]) {
+	if (ec->ec_exgq[xgq_id]) {
 		if (!ec->ec_xgq_ips) {
 			xocl_intc_ert_config(xdev, xgq_id, false);
 			xocl_intc_ert_request(xdev, xgq_id, NULL, NULL);
