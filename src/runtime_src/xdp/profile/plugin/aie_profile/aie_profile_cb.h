@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2021 Xilinx, Inc
+ * Copyright (C) 2023 Advanced Micro Devices, Inc. - All rights reserved
  *
  * Licensed under the Apache License, Version 2.0 (the "License"). You may
  * not use this file except in compliance with the License. A copy of the
@@ -14,16 +14,17 @@
  * under the License.
  */
 
-#ifndef __SubCmdConfigure_h_
-#define __SubCmdConfigure_h_
+#ifndef XDP_PLUGIN_AIE_PROFILE_CB_H
+#define XDP_PLUGIN_AIE_PROFILE_CB_H
 
-#include "tools/common/SubCmd.h"
-#include "tools/common/SubCmdConfigureInternal.h"
+#include "xdp/config.h"
 
-class SubCmdConfigure : public SubCmdConfigureInternal {
- public:
-  SubCmdConfigure(bool _isHidden, bool _isDepricated, bool _isPreliminary, const boost::property_tree::ptree configurations);
-};
+extern "C"
+XDP_EXPORT
+void updateAIECtrDevice(void* handle);
+
+extern "C"
+XDP_EXPORT
+void endAIECtrPoll(void* handle);
 
 #endif
-
