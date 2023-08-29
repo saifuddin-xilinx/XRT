@@ -110,6 +110,11 @@ void platform_axilite_flush(struct xclmgmt_dev *lro)
 
 	mgmt_info(lro, "Flushing axilite busses.");
 
+	/* First Map the Bars */
+	val = map_bars(lro);
+	if (!val)
+		return;
+
 	/* The flush sequence works as follows:
 	 * Read axilite peripheral up to 4 times
 	 * Check if firewall trips and clear it.
@@ -118,42 +123,45 @@ void platform_axilite_flush(struct xclmgmt_dev *lro)
 	 * (Feature ROM, MB Reset GPIO, Sysmon)
 	 */
 	for (i = 0; i < 4; i++) {
-		val = MGMT_READ_REG32(lro, _FEATURE_ROM_BASE);
+		val = ioread32(lro->core.bar_addr, _FEATURE_ROM_BASE);
 		xocl_af_clear(lro);
 	}
 
 	for (i = 0; i < 4; i++) {
-		gpio_val = MGMT_READ_REG32(lro, _MB_GPIO);
+		gpio_val = ioread32(lro->core.bar_addr, _MB_GPIO);
 		xocl_af_clear(lro);
 	}
 
 	for (i = 0; i < 4; i++) {
-		val = MGMT_READ_REG32(lro, _SYSMON_BASE);
+		val = ioread32(lro->core.bar_addr, _SYSMON_BASE);
 		xocl_af_clear(lro);
 	}
 
 	/* Can only read this safely if not in reset */
 	if (gpio_val == 1) {
 		for (i = 0; i < 4; i++) {
-			val = MGMT_READ_REG32(lro, _MB_IMAGE_SCHE);
+			val = ioread32(lro->core.bar_addr, _MB_IMAGE_SCHE);
 			xocl_af_clear(lro);
 		}
 	}
 
 	for (i = 0; i < 4; i++) {
-		val = MGMT_READ_REG32(lro, _XHWICAP_CR);
+		val = ioread32(lro->core.bar_addr, _XHWICAP_CR);
 		xocl_af_clear(lro);
 	}
 
 	for (i = 0; i < 4; i++) {
-		val = MGMT_READ_REG32(lro, _GPIO_NULL_BASE);
+		val = ioread32(lro->core.bar_addr, _GPIO_NULL_BASE);
 		xocl_af_clear(lro);
 	}
 
 	for (i = 0; i < 4; i++) {
-		val = MGMT_READ_REG32(lro, _AXI_GATE_BASE);
+		val = ioread32(lro->core.bar_addr, _AXI_GATE_BASE);
 		xocl_af_clear(lro);
 	}
+
+	/* Unmap the Bars */
+	unmap_bars(lro);
 }
 
 static int xocl_match_slot_and_wait(struct device *dev, void *data)

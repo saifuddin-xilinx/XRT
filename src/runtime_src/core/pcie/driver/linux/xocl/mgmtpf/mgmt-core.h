@@ -55,13 +55,6 @@
 
 #define DRV_NAME "xclmgmt"
 
-#define	MGMT_READ_REG32(lro, off)	\
-	ioread32(lro->core.bar_addr + off)
-#define	MGMT_WRITE_REG32(lro, off, val)	\
-	iowrite32(val, lro->core.bar_addr + off)
-#define	MGMT_WRITE_REG8(lro, off, val)	\
-	iowrite8(val, lro->core.bar_addr + off)
-
 #define	mgmt_err(lro, fmt, args...)	\
 	dev_err(&lro->core.pdev->dev, "%s: "fmt, __func__, ##args)
 #define	mgmt_warn(lro, fmt, args...)	\
@@ -180,6 +173,9 @@ void get_pcie_link_info(struct xclmgmt_dev *lro,
 
 void xclmgmt_connect_notify(struct xclmgmt_dev *lro, bool online);
 void store_pcie_link_info(struct xclmgmt_dev *lro);
+
+int map_bars(struct xclmgmt_dev *lro);
+int unmap_bars(struct xclmgmt_dev *lro);
 
 /* utils.c */
 int pci_fundamental_reset(struct xclmgmt_dev *lro);
