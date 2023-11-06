@@ -10,24 +10,12 @@
  * License version 2 or Apache License, Version 2.0.
  */
 
-#ifndef _ZOCL_DRV_H_
-#define _ZOCL_DRV_H_
+#ifndef _ZOCL_SCU_H_
+#define _ZOCL_SCU_H_
 
-/*
- * zocl drm dev specific data info, if there are different configs across
- * different compitible device, add their specific data here.
- */
-struct zdev_data {
-	char fpga_driver_name[64];
-	char fpga_driver_new_name[64];
-};
-
-struct zocl_drm_dev {
+struct zocl_scu_dev {
         /* platform device */
 	struct platform_device		*pdev;
-
-	/* DRM device handler */
-	struct drm_device		*drm_dev;
 };
 
 #endif

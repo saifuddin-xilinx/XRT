@@ -10,24 +10,18 @@
  * License version 2 or Apache License, Version 2.0.
  */
 
-#ifndef _ZOCL_DRV_H_
-#define _ZOCL_DRV_H_
+#ifndef _ZOCL_IRQ_INTC_H_
+#define _ZOCL_IRQ_INTC_H_
 
-/*
- * zocl drm dev specific data info, if there are different configs across
- * different compitible device, add their specific data here.
- */
-struct zdev_data {
-	char fpga_driver_name[64];
-	char fpga_driver_new_name[64];
+struct zocl_ert_intc_drv_data {
+	int (*add)(struct platform_device *pdev, u32 id, irq_handler_t handler, void *arg);
+	void (*remove)(struct platform_device *pdev, u32 id);
+	void (*config)(struct platform_device *pdev, u32 id, bool enabled);
 };
 
-struct zocl_drm_dev {
+struct zocl_irq_intc_dev {
         /* platform device */
 	struct platform_device		*pdev;
-
-	/* DRM device handler */
-	struct drm_device		*drm_dev;
 };
 
 #endif
