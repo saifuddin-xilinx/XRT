@@ -42,6 +42,9 @@ static int zocl_xgq_ert_probe(struct platform_device *pdev)
 	if (!zxgq_ert_dev)
 		return -ENOMEM;
 
+        zxgq_ert_dev->pdev = pdev;
+        platform_set_drvdata(pdev, zxgq_ert_dev);
+
 	zxgq_ert_info(zxgq_ert_dev, "Platform device Probed");
 	return 0;
 

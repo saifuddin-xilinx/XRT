@@ -98,6 +98,9 @@ static int zocl_drm_platform_probe(struct platform_device *pdev)
 	if (!zdev)
 		return -ENOMEM;
 
+	zdev->pdev = pdev;
+	platform_set_drvdata(pdev, zdev);
+
         zdev_info(zdev, "Platform device Probed");
         return 0;
 }
@@ -117,6 +120,7 @@ static int zocl_drm_platform_remove(struct platform_device *pdev)
 
 	if (!zdev)
 		return -EINVAL;
+
 
         zdev_info(zdev, "Platform device Removed");
         return 0;

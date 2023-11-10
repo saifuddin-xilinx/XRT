@@ -39,6 +39,9 @@ static int zocl_rpu_channel_probe(struct platform_device *pdev)
 	if (!zrpu_dev)
 		return -ENOMEM;
 
+	zrpu_dev->pdev = pdev;
+	platform_set_drvdata(pdev, zrpu_dev);
+
 	zrpu_info(zrpu_dev, "Platform device Probed");
 	return 0;
 };

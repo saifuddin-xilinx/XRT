@@ -62,6 +62,9 @@ static int zocl_csr_intc_probe(struct platform_device *pdev)
 	if (!zcsr_dev)
 		return -ENOMEM;
 
+	zcsr_dev->pdev = pdev;
+	platform_set_drvdata(pdev, zcsr_dev);
+
 	zcsr_info(zcsr_dev, "Platform device Probed");
 	return 0;
 }

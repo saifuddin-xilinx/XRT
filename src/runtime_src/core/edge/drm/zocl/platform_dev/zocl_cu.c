@@ -36,6 +36,9 @@ static int zocl_cu_probe(struct platform_device *pdev)
 	if (!zcu_dev)
 		return -ENOMEM;
 
+	zcu_dev->pdev = pdev;
+	platform_set_drvdata(pdev, zcu_dev);
+
 	zcu_info(zcu_dev, "Platform device Probed");
 	return 0;
 }

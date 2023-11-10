@@ -45,6 +45,9 @@ static int zocl_ospi_versal_probe(struct platform_device  *pdev)
 	if (!zospi_dev)
 		return -ENOMEM;
 
+	zospi_dev->pdev = pdev;
+	platform_set_drvdata(pdev, zospi_dev);
+
 	zospi_info(zospi_dev, "Platform device Probed");
 	return 0;
 }

@@ -70,6 +70,9 @@ static int zocl_irq_intc_probe(struct platform_device *pdev)
 	if (!zirq_dev)
 		return -ENOMEM;
 
+	zirq_dev->pdev = pdev;
+	platform_set_drvdata(pdev, zirq_dev);
+
 	zirq_info(zirq_dev, "Platform device Probed");
 	return 0;
 }
