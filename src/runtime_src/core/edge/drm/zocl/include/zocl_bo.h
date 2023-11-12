@@ -13,7 +13,7 @@
 #ifndef _ZOCL_BO_H_
 #define _ZOCL_BO_H_
 
-struct zocl_drm_mem_manager {
+struct zocl_drm_bo_manager {
 	/* DRM MM node for PL-DDR */
 	struct drm_mm           *zdrm_mem_manager;    i
 	struct mutex             zdrm_mm_lock;

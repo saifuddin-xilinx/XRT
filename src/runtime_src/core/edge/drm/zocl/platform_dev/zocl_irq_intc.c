@@ -63,7 +63,8 @@ static const struct platform_device_id zocl_irq_intc_id_match[] = {
 
 static int zocl_irq_intc_probe(struct platform_device *pdev)
 {
-	struct zocl_irq_intc_dev     *zirq_dev = NULL;
+	struct zocl_drm_dev             *zdev = NULL;
+	struct zocl_irq_intc_dev	*zirq_dev = NULL;
 
 	/* Create zocl irq_intc device and initial */
 	zirq_dev = devm_kzalloc(&pdev->dev, sizeof(*zirq_dev), GFP_KERNEL);
@@ -72,6 +73,19 @@ static int zocl_irq_intc_probe(struct platform_device *pdev)
 
 	zirq_dev->pdev = pdev;
 	platform_set_drvdata(pdev, zirq_dev);
+
+        zdev = zocl_get_zdev();
+        if (!zdev) {
+                zirq_info(zirq_dev, "ZOCL Device not yet initialized");
+                return -ENODEV;
+        }
+
+        /* Add this device to the global xgq device list */
+        mutex_lock(&zdev->dev_list_lock);
+        list_add_tail(&zirq_dev->list, &zdev->zirq_dev_list_head);
+        mutex_unlock(&zdev->dev_list_lock);
+
+        /* FIXME : IRQ INTC specific initialization starts from here */
 
 	zirq_info(zirq_dev, "Platform device Probed");
 	return 0;

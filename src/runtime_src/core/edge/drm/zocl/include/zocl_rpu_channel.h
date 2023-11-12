@@ -14,8 +14,10 @@
 #define _ZOCL_RPU_CHANNEL_H_
 
 struct zocl_rpu_channel_dev {
-        /* platform device */
-	struct platform_device		*pdev;
+	/* RPU Channel platform device  */
+	struct platform_device          *pdev;
+	struct zocl_drm_dev             *zdev_parent;
+
 };
 
 #endif

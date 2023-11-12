@@ -10,17 +10,13 @@
  * License version 2 or Apache License, Version 2.0.
  */
 
-#ifndef _ZOCL_ERT_H_
-#define _ZOCL_DRV_H_
-
-struct zocl_ert_info {
-	int                     model;
-	struct zocl_ert_ops    *ops;
-};
+#ifndef _ZOCL_XGQ_ERT_H_
+#define _ZOCL_XGQ_ERT_H_
 
 struct zocl_ert_dev {
-        /* platform device */
-	struct platform_device		*pdev;
+	/* ERT platform device  */
+	struct platform_device          *pdev;
+	struct zocl_drm_dev             *zdev_parent;
 };
 
 #endif

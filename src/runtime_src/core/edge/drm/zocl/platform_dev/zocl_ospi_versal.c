@@ -15,6 +15,7 @@
 #include <linux/mod_devicetable.h>
 #include <linux/platform_device.h>
 #include <linux/of_address.h>
+#include "zocl_drv.h"
 #include "zocl_common.h"
 #include "zocl_ospi_versal.h"
 
@@ -38,6 +39,7 @@ MODULE_DEVICE_TABLE(of, zocl_ospi_versal_of_match);
 
 static int zocl_ospi_versal_probe(struct platform_device  *pdev)
 {
+	struct zocl_drm_dev             *zdev = NULL;
 	struct zocl_ospi_versal_dev     *zospi_dev = NULL;
 
 	/* Create zocl ospi device and initial */
@@ -47,6 +49,18 @@ static int zocl_ospi_versal_probe(struct platform_device  *pdev)
 
 	zospi_dev->pdev = pdev;
 	platform_set_drvdata(pdev, zospi_dev);
+
+        zdev = zocl_get_zdev();
+        if (!zdev) {
+                zospi_info(zospi_dev, "ZOCL Device not yet initialized");
+                return -ENODEV;
+        }
+
+        /* Add this device to the global xgq device list */
+        zdev->zospi_dev = zospi_dev;
+        zospi_dev->zdev_parent = zdev;
+
+        /* FIXME : OSPI Related initialization starts from here */
 
 	zospi_info(zospi_dev, "Platform device Probed");
 	return 0;

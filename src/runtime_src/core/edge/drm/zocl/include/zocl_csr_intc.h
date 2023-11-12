@@ -14,8 +14,11 @@
 #define _ZOCL_CSR_INTC_H_
 
 struct zocl_csr_intc_dev {
-        /* platform device */
-	struct platform_device		*pdev;
+	/* CSR platform device list */
+	struct platform_device          *pdev;
+	struct zocl_drm_dev             *zdev_parent;
+	struct list_head                list;
+
 };
 
 #endif

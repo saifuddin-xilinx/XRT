@@ -55,7 +55,8 @@ static const struct platform_device_id zocl_csr_intc_id_match[] = {
 
 static int zocl_csr_intc_probe(struct platform_device *pdev)
 {
-	struct zocl_csr_intc_dev     *zcsr_dev = NULL;
+        struct zocl_drm_dev             *zdev = NULL;
+	struct zocl_csr_intc_dev	*zcsr_dev = NULL;
 
 	/* Create zocl csr_intc device and initial */
 	zcsr_dev = devm_kzalloc(&pdev->dev, sizeof(*zcsr_dev), GFP_KERNEL);
@@ -64,6 +65,19 @@ static int zocl_csr_intc_probe(struct platform_device *pdev)
 
 	zcsr_dev->pdev = pdev;
 	platform_set_drvdata(pdev, zcsr_dev);
+
+        zdev = zocl_get_zdev();
+        if (!zdev) {
+                zcsr_info(zcsr_dev, "ZOCL Device not yet initialized");
+                return -ENODEV;
+        }
+
+        /* Add this device to the global xgq device list */
+        mutex_lock(&zdev->dev_list_lock);
+        list_add_tail(&zcsr_dev->list, &zdev->zcsr_dev_list_head);
+        mutex_unlock(&zdev->dev_list_lock);
+
+        /* FIXME : CSR INTC specific initialization starts from here */
 
 	zcsr_info(zcsr_dev, "Platform device Probed");
 	return 0;

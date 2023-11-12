@@ -20,8 +20,11 @@ struct zocl_ert_intc_drv_data {
 };
 
 struct zocl_irq_intc_dev {
-        /* platform device */
-	struct platform_device		*pdev;
+	/* IRQ platform device list */
+	struct platform_device          *pdev;
+	struct zocl_drm_dev             *zdev_parent;
+	struct list_head                list;
+
 };
 
 #endif

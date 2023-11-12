@@ -13,6 +13,22 @@
 #ifndef _ZOCL_DRV_H_
 #define _ZOCL_DRV_H_
 
+#include <drm/drm.h>
+#include <drm/drm_device.h>
+#include <drm/drm_drv.h>
+#include <linux/version.h>
+#include <linux/list.h>
+
+/* Platform device driver declaration */
+extern struct platform_driver zocl_xgq_driver;
+extern struct platform_driver zocl_ospi_versal_driver;
+extern struct platform_driver zocl_ert_driver;
+extern struct platform_driver zocl_csr_intc_driver;
+extern struct platform_driver zocl_irq_intc_driver;
+extern struct platform_driver zocl_rpu_channel_driver;
+extern struct platform_driver zocl_cu_driver;
+extern struct platform_driver zocl_scu_driver;
+
 /*
  * zocl drm dev specific data info, if there are different configs across
  * different compitible device, add their specific data here.
@@ -27,7 +43,28 @@ struct zocl_drm_dev {
 	struct platform_device		*pdev;
 
 	/* DRM device handler */
-	struct drm_device		*drm_dev;
+	struct drm_device		*drm_zdev;
+
+	/* Platform device handlers */
+	struct zocl_ospi_versal_dev	*zospi_dev;
+	struct zocl_rpu_channel_dev	*zrpu_dev;
+	struct zocl_ert_dev		*zert_dev;
+	struct list_head		zxgq_dev_list_head;
+	struct list_head		zirq_dev_list_head;
+	struct list_head		zcsr_dev_list_head;
+	struct mutex			dev_list_lock;
+	//struct zocl_xgq_dev		*zxgq_dev;
+	//struct zocl_irq_intc_dev	*zirq_dev;
+	//struct zocl_csr_intc_dev	*zcsr_dev;
+
+	/* Sub module data structure */
+	struct zocl_mem_manager		*zdev_mem;
+	struct zocl_scheduler		*zdev_sched;
+	struct zocl_ctx_manager		*zdev_ctx;
+	struct zocl_xclbin		*zdev_xclbin;
+	struct zocl_aie			*zdev_aie;
+
+	/* Other utility data structure */
 };
 
 #endif

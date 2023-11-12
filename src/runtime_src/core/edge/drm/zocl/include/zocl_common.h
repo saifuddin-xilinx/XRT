@@ -10,20 +10,40 @@
  * License version 2 or Apache License, Version 2.0.
  */
 
-#ifndef _ZOCL_BO_H_
-#define _ZOCL_BO_H_
+#ifndef _ZOCL_COMMON_H_
+#define _ZOCL_COMMON_H_
 
-struct zocl_drm_mem_manager {
-	/* DRM MM node for PL-DDR */
-	struct drm_mm           *zdrm_mem_manager;    i
-	struct mutex             zdrm_mm_lock;
+#include <linux/platform_device.h>
+#include <asm/io.h>
+#include "zocl_drv.h"
 
-	/* Zocl driver memory list head */
-	struct list_head         zdrm_mm_list_head;
+#define ZDEV2PDEV(zdev)			((zdev)->pdev)
 
-	struct iommu_domain     *zocl_domain;
-	phys_addr_t              zocl_host_mem;
-	resource_size_t          zocl_host_mem_len;
-};
+#define zocl_err(dev, fmt, args...)     dev_err(dev, "%s: "fmt, __func__, ##args)
+#define zocl_warn(dev, fmt, args...)    dev_warn(dev, "%s: "fmt, __func__, ##args)
+#define zocl_info(dev, fmt, args...)    dev_info(dev, "%s: "fmt, __func__, ##args)
+#define zocl_dbg(dev, fmt, args...)     dev_dbg(dev, "%s: "fmt, __func__, ##args)
+
+struct platform_device *zocl_find_pdev(char *name);
+
+static inline void reg_write(void __iomem *base, u64 off, u32 val)
+{
+	iowrite32(val, base + off);
+}
+
+static inline u32 reg_read(void __iomem *base, u64 off)
+{
+	return ioread32(base + off);
+}
+
+/* Get the platform device node */
+static inline struct zocl_drm_dev *zocl_get_zdev(void)
+{
+	struct platform_device *pdev = zocl_find_pdev("zyxclmm_drm");
+	if(!pdev)
+		return NULL;
+
+	return platform_get_drvdata(pdev);
+}
 
 #endif

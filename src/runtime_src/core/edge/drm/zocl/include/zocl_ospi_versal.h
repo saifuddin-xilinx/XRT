@@ -14,8 +14,9 @@
 #define _ZOCL_OSPI_VERSAL_H_
 
 struct zocl_ospi_versal_dev {
-        /* platform device */
-	struct platform_device		*pdev;
+        /* OSPI platform device  */
+	struct platform_device          *pdev;
+	struct zocl_drm_dev             *zdev_parent;
 };
 
 #endif

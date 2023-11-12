@@ -21,8 +21,8 @@
 #include <linux/mod_devicetable.h>
 #include <linux/platform_device.h>
 #include <linux/of_address.h>
-#include "zocl_common.h"
 #include "zocl_drv.h"
+#include "zocl_common.h"
 
 /* Driver Debug Macros */
 #define ZDRM2DEV(zdev)                 (&ZDEV2PDEV(zdev)->dev)
@@ -101,6 +101,12 @@ static int zocl_drm_platform_probe(struct platform_device *pdev)
 	zdev->pdev = pdev;
 	platform_set_drvdata(pdev, zdev);
 
+	/* Initialize the component platform devices list head */
+	mutex_init(&zdev->dev_list_lock);
+	INIT_LIST_HEAD(&zdev->zxgq_dev_list_head);
+	INIT_LIST_HEAD(&zdev->zirq_dev_list_head);
+	INIT_LIST_HEAD(&zdev->zcsr_dev_list_head);
+
         zdev_info(zdev, "Platform device Probed");
         return 0;
 }
@@ -136,45 +142,35 @@ struct platform_driver zocl_drm_private_driver = {
         },
 };
 
-static struct platform_driver *zocl_platform_drivers[] = {
+static struct platform_driver *zocl_component_platform_drivers[] = {
 	&zocl_cu_driver,
 	&zocl_scu_driver,
 	&zocl_csr_intc_driver,
 	&zocl_irq_intc_driver,
 	&zocl_ospi_versal_driver,
-	&zocl_cu_xgq_driver,
-	&zocl_xgq_ert_driver,
+	&zocl_xgq_driver,
+	&zocl_ert_driver,
 	&zocl_rpu_channel_driver,
-	&zocl_drm_private_driver,
 };
 
 static int __init zocl_init(void)
 {
-	int ret = 0;
-	int i = 0;
-	int total = ARRAY_SIZE(zocl_platform_drivers);
+	/* Register the parent versal driver zyxclmm_drm */
+	if (platform_driver_register(&zocl_drm_private_driver))
+		return -ENODEV;
 
-	/* HACK: fix ert driver. */
-	if (!enable_xgq_ert) {
-		for (i = 0; i < total; i++) {
-			if (zocl_platform_drivers[i] == &zocl_xgq_ert_driver) {
-				zocl_platform_drivers[i] = &zocl_ert_driver;
-				break;
-			}
-		}
-	}
-
-	ret = platform_register_drivers(zocl_platform_drivers,
-					ARRAY_SIZE(zocl_platform_drivers));
-
-	return ret;
+	/* Now register the other component platform drivers */
+	return platform_register_drivers(zocl_component_platform_drivers,
+				ARRAY_SIZE(zocl_component_platform_drivers));
 }
 module_init(zocl_init);
 
 static void __exit zocl_exit(void)
 {
-	platform_unregister_drivers (zocl_platform_drivers,
-				     ARRAY_SIZE(zocl_platform_drivers));
+	platform_unregister_drivers(zocl_component_platform_drivers,
+			     ARRAY_SIZE(zocl_component_platform_drivers));
+
+	platform_driver_unregister(&zocl_drm_private_driver);
 }
 module_exit(zocl_exit);
 

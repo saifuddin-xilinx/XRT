@@ -10,12 +10,14 @@
  * License version 2 or Apache License, Version 2.0.
  */
 
-#ifndef _ZOCL_CU_XGQ_H_
-#define _ZOCL_CU_XGQ_H_
+#ifndef _ZOCL_XGQ_H_
+#define _ZOCL_XGQ_H_
 
-struct zocl_cu_xgq_dev {
-        /* platform device */
+struct zocl_xgq_dev {
+	/* XGQ platform device list */
 	struct platform_device		*pdev;
+	struct zocl_drm_dev             *zdev_parent;
+	struct list_head                list;
 };
 
 #endif

@@ -49,18 +49,18 @@ drv_common-y   := $(common_dir)/kds_hwctx.o \
 
 zocl_drv-y := \
 	zocl_drv.o \
+	zocl_common.o \
 	#zocl_kds.o
 
 zocl_platform_dev_dir := $(make_dir)/platform_dev
 zocl_platform_dev-y := $(zocl_platform_dev_dir)/zocl_ospi_versal.o \
 	$(zocl_platform_dev_dir)/zocl_rpu_channel.o \
-	$(zocl_platform_dev_dir)/zocl_xgq_ert.o \
+	$(zocl_platform_dev_dir)/zocl_ert.o \
 	$(zocl_platform_dev_dir)/zocl_irq_intc.o \
 	$(zocl_platform_dev_dir)/zocl_csr_intc.o \
-	$(zocl_platform_dev_dir)/zocl_cu_xgq.o \
+	$(zocl_platform_dev_dir)/zocl_xgq.o \
 	$(zocl_platform_dev_dir)/zocl_cu.o \
-	$(zocl_platform_dev_dir)/zocl_scu.o \
-	$(zocl_platform_dev_dir)/zocl_ert.o 
+	$(zocl_platform_dev_dir)/zocl_scu.o 
 
 zocl-y := \
 	$(drv_common-y) \
@@ -91,7 +91,7 @@ modules_install:
 
 clean:
 	rm -f *.o *~ core .depend .*.cmd *.ko *.mod.c *.mod
-	rm -f $(zocl_platform_dev_dir)/*.o
+	rm -f $(zocl_platform_dev_dir)/*.o $(zocl_platform_dev_dir)/.*.cmd
 	rm -f Module.markers Module.symvers modules.order
 	rm -rf .tmp_versions Modules.symvers
 	$(MAKE) -C $(common_dir) clean

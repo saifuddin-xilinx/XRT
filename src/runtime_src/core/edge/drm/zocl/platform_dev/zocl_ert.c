@@ -15,47 +15,39 @@
 #include "zocl_ert.h"
 
 /* Driver Debug Macros */
-#define ZRPU2DEV(zert)                 (&ZDEV2PDEV(zert)->dev)
-#define zert_err(zert, fmt, args...)   zocl_err(ZRPU2DEV(zert), fmt"\n", ##args)
-#define zert_warn(zert, fmt, args...)  zocl_warn(ZRPU2DEV(zert), fmt"\n", ##args)
-#define zert_info(zert, fmt, args...)  zocl_info(ZRPU2DEV(zert), fmt"\n", ##args)
-#define zert_dbg(zert, fmt, args...)   zocl_dbg(ZRPU2DEV(zert), fmt"\n", ##args)
+#define ZERT2DEV(zert)                 (&ZDEV2PDEV(zert)->dev)
+#define zert_err(zert, fmt, args...)   zocl_err(ZERT2DEV(zert), fmt"\n", ##args)
+#define zert_warn(zert, fmt, args...)  zocl_warn(ZERT2DEV(zert), fmt"\n", ##args)
+#define zert_info(zert, fmt, args...)  zocl_info(ZERT2DEV(zert), fmt"\n", ##args)
+#define zert_dbg(zert, fmt, args...)   zocl_dbg(ZERT2DEV(zert), fmt"\n", ##args)
 
 #define ZERT_DRIVER_NAME "zert_embedded_sched_versal"
 
-static const struct zocl_ert_info mpsoc_ert_info = {
-	/* TODO : Fill it */
-	//.ops   = &mpsoc_ops,
-};
-
-static const struct zocl_ert_info versal_ert_info = {
-	/* TODO : Fill it */
-	//.ops   = &versal_ops,
-};
-
-static const struct of_device_id zocl_ert_of_match[] = {
-	{ .compatible = "xlnx,embedded_sched", .data = &mpsoc_ert_info},
-	{ .compatible = "xlnx,embedded_sched_versal", .data = &versal_ert_info},
-	{ /* end of table */ },
-};
-
-MODULE_DEVICE_TABLE(of, zocl_ert_of_match);
-
 static int zocl_ert_probe(struct platform_device *pdev)
 {
+	struct zocl_drm_dev		*zdev = NULL;
 	struct zocl_ert_dev		*zert_dev = NULL;
-	const struct of_device_id	*id = NULL;
 
-	id = of_match_node(zocl_ert_of_match, pdev->dev.of_node);
-	if (!id)
-		return -EINVAL;
-
+	/* Create zocl ert device and initialize */
 	zert_dev = devm_kzalloc(&pdev->dev, sizeof(*zert_dev), GFP_KERNEL);
 	if (!zert_dev)
 		return -ENOMEM;
 
-	zert_info(zert_dev, "Platform device Probed");
+	zert_dev->pdev = pdev;
+	platform_set_drvdata(pdev, zert_dev);
 
+	zdev = zocl_get_zdev();
+	if (!zdev) {
+		zert_info(zert_dev, "ZOCL Device not yet initialized");
+		return -ENODEV;
+	}
+
+	zert_dev->zdev_parent = zdev;
+	zdev->zert_dev = zert_dev;
+
+	/* FIXME : ERT Related initialization starts from here */
+
+	zert_info(zert_dev, "Platform device Probed");
 	return 0;
 }
 
@@ -70,11 +62,20 @@ static int zocl_ert_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static const struct of_device_id zocl_ert_of_match[] = {
+	//{ .compatible = "xlnx,embedded_sched", .data = &mpsoc_ert_info},
+	//{ .compatible = "xlnx,embedded_sched_versal", .data = &versal_ert_info},
+	{ .compatible = "xlnx,embedded_sched"},
+	{ .compatible = "xlnx,embedded_sched_versal"},
+	{ /* end of table */ },
+};
+MODULE_DEVICE_TABLE(of, zocl_ert_of_match);
+
 struct platform_driver zocl_ert_driver = {
+	.probe  = zocl_ert_probe,
+	.remove = zocl_ert_remove,
 	.driver = {
 		.name = ZERT_DRIVER_NAME,
 		.of_match_table = zocl_ert_of_match,
 	},
-	.probe  = zocl_ert_probe,
-	.remove = zocl_ert_remove,
 };

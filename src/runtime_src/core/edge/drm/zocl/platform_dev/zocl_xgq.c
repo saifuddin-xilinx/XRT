@@ -13,7 +13,7 @@
 #include <linux/platform_device.h>
 #include <linux/of_address.h>
 #include "zocl_common.h"
-#include "zocl_cu_xgq.h"
+#include "zocl_xgq.h"
 
 /* Driver Debug Macros */
 #define ZXGQ2DEV(zxgq)                 (&ZDEV2PDEV(zxgq)->dev)
@@ -23,11 +23,12 @@
 #define zxgq_dbg(zxgq, fmt, args...)   zocl_dbg(ZXGQ2DEV(zxgq), fmt"\n", ##args)
 
 /* CU XGQ driver name. */
-#define ZCU_XGQ_DRIVER_NAME "zocl-cu-xgq"
+#define ZCU_XGQ_DRIVER_NAME "zocl-xgq"
 
-static int zocl_cu_xgq_probe(struct platform_device *pdev)
+static int zocl_xgq_probe(struct platform_device *pdev)
 {
-	struct zocl_cu_xgq_dev             *zxgq_dev = NULL;
+	struct zocl_drm_dev             *zdev = NULL;
+	struct zocl_xgq_dev             *zxgq_dev = NULL;
 
 	/* Create zocl device and initial */
 	zxgq_dev = devm_kzalloc(&pdev->dev, sizeof(*zxgq_dev), GFP_KERNEL);
@@ -37,13 +38,25 @@ static int zocl_cu_xgq_probe(struct platform_device *pdev)
 	zxgq_dev->pdev = pdev;
 	platform_set_drvdata(pdev, zxgq_dev);
 
+	zdev = zocl_get_zdev();
+	if (!zdev) {
+		zxgq_info(zxgq_dev, "ZOCL Device not yet initialized");
+		return -ENODEV;
+	}
+
+	/* Add this device to the global xgq device list */
+	mutex_lock(&zdev->dev_list_lock);
+	list_add_tail(&zxgq_dev->list, &zdev->zxgq_dev_list_head);
+	mutex_unlock(&zdev->dev_list_lock);
+
+	/* FIXME : XGQ specific initialization starts from here */
 	zxgq_info(zxgq_dev, "Platform device Probed");
 	return 0;
 }
 
-static int zocl_cu_xgq_remove(struct platform_device *pdev)
+static int zocl_xgq_remove(struct platform_device *pdev)
 {
-	struct zocl_cu_xgq_dev *zxgq_dev = platform_get_drvdata(pdev);
+	struct zocl_xgq_dev *zxgq_dev = platform_get_drvdata(pdev);
 
 	if (!zxgq_dev)
 		return -EINVAL;
@@ -52,18 +65,18 @@ static int zocl_cu_xgq_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static const struct of_device_id zocl_cu_xgq_of_match[] = {
+static const struct of_device_id zocl_xgq_of_match[] = {
 	{ .compatible = "xlnx,cmd-queue-1.0"},
 	{ /* end of table */ },
 };
-MODULE_DEVICE_TABLE(of, zocl_cu_xgq_of_match);
+MODULE_DEVICE_TABLE(of, zocl_xgq_of_match);
 
-struct platform_driver zocl_cu_xgq_driver = {
-	.probe  = zocl_cu_xgq_probe,
-	.remove = zocl_cu_xgq_remove,
+struct platform_driver zocl_xgq_driver = {
+	.probe  = zocl_xgq_probe,
+	.remove = zocl_xgq_remove,
 
 	.driver = {
 		.name = ZCU_XGQ_DRIVER_NAME,
-		.of_match_table = zocl_cu_xgq_of_match,
+		.of_match_table = zocl_xgq_of_match,
 	},
 };

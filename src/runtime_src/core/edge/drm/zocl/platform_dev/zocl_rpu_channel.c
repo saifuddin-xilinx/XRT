@@ -25,13 +25,9 @@
 
 #define ZRPU_DRIVER_NAME "zocl-rpu-channel"
 
-static const struct of_device_id zocl_rpu_channel_of_match[] = {
-	{ .compatible = "xlnx,rpu-channel", },
-	{ /* end of table */ },
-};
-
 static int zocl_rpu_channel_probe(struct platform_device *pdev)
 {
+	struct zocl_drm_dev		*zdev = NULL;
 	struct zocl_rpu_channel_dev	*zrpu_dev = NULL;
 
 	/* Create zocl rpu channel device and initial */
@@ -41,6 +37,18 @@ static int zocl_rpu_channel_probe(struct platform_device *pdev)
 
 	zrpu_dev->pdev = pdev;
 	platform_set_drvdata(pdev, zrpu_dev);
+
+	zdev = zocl_get_zdev();
+	if (!zdev) {
+		zrpu_info(zrpu_dev, "ZOCL Device not yet initialized");
+		return -ENODEV;
+	}
+
+	/* Add this device to the global xgq device list */
+	zdev->zrpu_dev = zrpu_dev;
+	zrpu_dev->zdev_parent = zdev;
+
+	/* FIXME : RPU Related initialization starts from here */
 
 	zrpu_info(zrpu_dev, "Platform device Probed");
 	return 0;
@@ -56,6 +64,12 @@ static int zocl_rpu_channel_remove(struct platform_device *pdev)
 	zrpu_info(zrpu_dev, "Platform device Removed");
 	return 0;
 };
+
+static const struct of_device_id zocl_rpu_channel_of_match[] = {
+	{ .compatible = "xlnx,rpu-channel", },
+	{ /* end of table */ },
+};
+MODULE_DEVICE_TABLE(of, zocl_rpu_channel_of_match);
 
 struct platform_driver zocl_rpu_channel_driver = {
 	.driver = {
