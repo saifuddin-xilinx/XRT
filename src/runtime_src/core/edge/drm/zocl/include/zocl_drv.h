@@ -26,8 +26,8 @@ extern struct platform_driver zocl_ert_driver;
 extern struct platform_driver zocl_csr_intc_driver;
 extern struct platform_driver zocl_irq_intc_driver;
 extern struct platform_driver zocl_rpu_channel_driver;
-extern struct platform_driver zocl_cu_driver;
-extern struct platform_driver zocl_scu_driver;
+extern struct platform_driver zocl_platfrm_cu_driver;
+extern struct platform_driver zocl_platfrm_scu_driver;
 
 /*
  * zocl drm dev specific data info, if there are different configs across
@@ -57,9 +57,12 @@ struct zocl_drm_dev {
 	//struct zocl_irq_intc_dev	*zirq_dev;
 	//struct zocl_csr_intc_dev	*zcsr_dev;
 
-	/* Sub module data structure */
-	struct zocl_mem_manager		*zdev_mem;
-	struct zocl_scheduler		*zdev_sched;
+	/* Sub module data structure handler */
+	void				*zdev_bo;
+	void				*zdev_sched;
+
+	//struct zocl_drm_bo_manager	*zdev_bo;
+	//struct zocl_scheduler		*zdev_sched;
 	struct zocl_ctx_manager		*zdev_ctx;
 	struct zocl_xclbin		*zdev_xclbin;
 	struct zocl_aie			*zdev_aie;

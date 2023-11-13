@@ -14,7 +14,7 @@
 #include <linux/interrupt.h>
 
 #include "zocl_common.h"
-#include "zocl_irq_intc.h"
+#include "zocl_intc.h"
 
 /* Driver Debug Macros */
 #define ZIRQ2DEV(zirq)                 (&ZDEV2PDEV(zirq)->dev)
@@ -24,9 +24,15 @@
 #define zirq_dbg(zirq, fmt, args...)   zocl_dbg(ZIRQ2DEV(zirq), fmt"\n", ##args)
 
 #define ZOCL_IRQ_DRIVER_NAME "zocl-irq-intc"
+#define ZOCL_IRQ_INTC_DRIVER_NAME "ZOCL_IRQ_INTC"
 
-#define ZOCL_XGQ_INTC_DRIVER_NAME "ZOCL_XGQ_INTC"
-#define ZOCL_CU_INTC_DRIVER_NAME "ZOCL_CU_INTC"
+struct zocl_irq_intc_dev {
+	/* IRQ INTC platform device list */
+	struct platform_device          *pdev;
+	struct zocl_intc_handler	*intc_handlr;
+
+	struct list_head                list;
+};
 
 static void zirq_intc_config(struct platform_device *pdev, u32 id,
 				 bool enabled)
@@ -47,17 +53,16 @@ static int zirq_intc_add(struct platform_device *pdev, u32 id,
 }
 
 /*
- * Interfaces exposed to other subdev drivers.
+ * Interfaces exposed to other platform drivers.
  */
-static struct zocl_ert_intc_drv_data zocl_irq_intc_drvdata = {
+static struct zocl_intc_drv_data zocl_irq_intc_drvdata = {
 	.add = zirq_intc_add,
 	.remove = zirq_intc_remove,
 	.config = zirq_intc_config
 };
 
 static const struct platform_device_id zocl_irq_intc_id_match[] = {
-	{ ZOCL_XGQ_INTC_DRIVER_NAME, (kernel_ulong_t)&zocl_irq_intc_drvdata },
-	{ ZOCL_CU_INTC_DRIVER_NAME, (kernel_ulong_t)&zocl_irq_intc_drvdata },
+	{ ZOCL_IRQ_INTC_DRIVER_NAME, (kernel_ulong_t)&zocl_irq_intc_drvdata },
 	{ /* end of table */ },
 };
 
@@ -80,7 +85,7 @@ static int zocl_irq_intc_probe(struct platform_device *pdev)
                 return -ENODEV;
         }
 
-        /* Add this device to the global xgq device list */
+        /* Add this device to the global irq device list */
         mutex_lock(&zdev->dev_list_lock);
         list_add_tail(&zirq_dev->list, &zdev->zirq_dev_list_head);
         mutex_unlock(&zdev->dev_list_lock);

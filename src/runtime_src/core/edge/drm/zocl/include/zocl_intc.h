@@ -10,21 +10,20 @@
  * License version 2 or Apache License, Version 2.0.
  */
 
-#ifndef _ZOCL_IRQ_INTC_H_
-#define _ZOCL_IRQ_INTC_H_
+#ifndef _ZOCL_INTC_H_
+#define _ZOCL_INTC_H_
 
-struct zocl_ert_intc_drv_data {
-	int (*add)(struct platform_device *pdev, u32 id, irq_handler_t handler, void *arg);
+struct zocl_intc_drv_data {
+	int (*add)(struct platform_device *pdev, u32 id, irq_handler_t handler,
+		   void *arg);
 	void (*remove)(struct platform_device *pdev, u32 id);
 	void (*config)(struct platform_device *pdev, u32 id, bool enabled);
 };
 
-struct zocl_irq_intc_dev {
-	/* IRQ platform device list */
-	struct platform_device          *pdev;
-	struct zocl_drm_dev             *zdev_parent;
-	struct list_head                list;
-
+struct zocl_intc_handler {
+	/* INTC(Interrupt Controller) platform device list */
+	struct platform_device		*pdev;
+	struct zocl_drm_dev		*zdev_parent;
 };
 
 #endif

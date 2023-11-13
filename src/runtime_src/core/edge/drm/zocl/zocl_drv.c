@@ -33,8 +33,10 @@
 
 int kds_echo = 0;
 
-#define ZOCL_DRIVER_NAME        "zocl"
+/* TODO SAIF_DEBUG ONLY */
+int sched_type = 0;
 
+#define ZOCL_DRIVER_NAME        "zocl"
 #define ZOCL_DRIVER_DESC        "Zynq BO manager"
 
 static char driver_date[9];
@@ -143,8 +145,8 @@ struct platform_driver zocl_drm_private_driver = {
 };
 
 static struct platform_driver *zocl_component_platform_drivers[] = {
-	&zocl_cu_driver,
-	&zocl_scu_driver,
+	&zocl_platfrm_cu_driver,
+	&zocl_platfrm_scu_driver,
 	&zocl_csr_intc_driver,
 	&zocl_irq_intc_driver,
 	&zocl_ospi_versal_driver,

@@ -13,7 +13,7 @@
 #include <linux/platform_device.h>
 #include <linux/of_address.h>
 #include "zocl_common.h"
-#include "zocl_cu.h"
+#include "zocl_platfrm_cu.h"
 
 /* Driver Debug Macros */
 #define ZCU2DEV(zcu)                 (&ZDEV2PDEV(zcu)->dev)
@@ -23,13 +23,37 @@
 #define zcu_dbg(zcu, fmt, args...)   zocl_dbg(ZCU2DEV(zcu), fmt"\n", ##args)
 
 /* ZOCL CU driver name. */
-#define ZOCL_CU_DRIVER_NAME "zocl-cu"
+#define ZOCL_CU_DRIVER_NAME "zocl-platform-cu"
+#define ZOCL_CU_NAME "ZOCL_PLATFROM_CU"
 
-#define ZOCL_CU_NAME "ZOCL_CU"
+struct zocl_platfrm_cu_dev {
+	/* CU platform device */
+	struct platform_device		*pdev;
+};
 
-static int zocl_cu_probe(struct platform_device *pdev)
+static int zcu_configure(struct platform_device *pdev, u32 cu_id, void *arg)
 {
-	struct zocl_cu_dev             *zcu_dev = NULL;
+	/* TODO : FILL IT */
+	return 0;
+}
+
+static int zcu_unconfigure(struct platform_device *pdev, u32 cu_id)
+{
+	/* TODO : FILL IT */
+	return 0;
+}
+
+/*
+ *  Interfaces exposed to other platform drivers.
+ */
+static struct zocl_platfrm_cu_drvdata zocl_platfrm_cu_drvdata = {
+	.config_cu = zcu_configure,
+	.unconfig_cu = zcu_unconfigure
+};
+
+static int zocl_platfrm_cu_probe(struct platform_device *pdev)
+{
+	struct zocl_platfrm_cu_dev	*zcu_dev = NULL;
 
 	/* Create zocl device and initial */
 	zcu_dev = devm_kzalloc(&pdev->dev, sizeof(*zcu_dev), GFP_KERNEL);
@@ -43,9 +67,9 @@ static int zocl_cu_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int zocl_cu_remove(struct platform_device *pdev)
+static int zocl_platfrm_cu_remove(struct platform_device *pdev)
 {
-	struct zocl_cu_dev *zcu_dev = platform_get_drvdata(pdev);
+	struct zocl_platfrm_cu_dev *zcu_dev = platform_get_drvdata(pdev);
 
 	if (!zcu_dev)
 		return -EINVAL;
@@ -54,15 +78,15 @@ static int zocl_cu_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static const struct platform_device_id zocl_cu_id_match[] = {
-	{ ZOCL_CU_NAME, 0 },
+static const struct platform_device_id zocl_platfrm_cu_id_match[] = {
+	{ ZOCL_CU_NAME, (kernel_ulong_t)&zocl_platfrm_cu_drvdata },
 	{ /* end of table */ },
 };
 
-struct platform_driver zocl_cu_driver = {
-	.probe  = zocl_cu_probe,
-	.remove = zocl_cu_remove,
-	.id_table = zocl_cu_id_match,
+struct platform_driver zocl_platfrm_cu_driver = {
+	.probe  = zocl_platfrm_cu_probe,
+	.remove = zocl_platfrm_cu_remove,
+	.id_table = zocl_platfrm_cu_id_match,
 
 	.driver = {
 		.name = ZOCL_CU_DRIVER_NAME,

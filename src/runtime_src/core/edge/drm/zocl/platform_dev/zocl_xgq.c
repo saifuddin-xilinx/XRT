@@ -22,8 +22,32 @@
 #define zxgq_info(zxgq, fmt, args...)  zocl_info(ZXGQ2DEV(zxgq), fmt"\n", ##args)
 #define zxgq_dbg(zxgq, fmt, args...)   zocl_dbg(ZXGQ2DEV(zxgq), fmt"\n", ##args)
 
-/* CU XGQ driver name. */
+/* XGQ driver name. */
 #define ZCU_XGQ_DRIVER_NAME "zocl-xgq"
+
+struct zocl_xgq_dev {
+	/* XGQ platform device list */
+	struct platform_device          *pdev;
+	struct zocl_drm_dev             *zdev_parent;
+	struct list_head                list;
+};
+
+static int zocl_xgq_attach(struct platform_device *pdev, u32 xgq_id, void *arg)
+{
+	/* FIXME : Fill this function */
+	return 0;
+}
+
+static int zocl_xgq_detach(struct platform_device *pdev, u32 xgq_id)
+{
+	/* FIXME : Fill this function */
+	return 0;
+}
+
+static struct zocl_xgq_drv_data zocl_xgq_drvdata = {
+	.attach = zocl_xgq_attach,
+	.detach = zocl_xgq_detach,
+};
 
 static int zocl_xgq_probe(struct platform_device *pdev)
 {
@@ -66,7 +90,7 @@ static int zocl_xgq_remove(struct platform_device *pdev)
 }
 
 static const struct of_device_id zocl_xgq_of_match[] = {
-	{ .compatible = "xlnx,cmd-queue-1.0"},
+	{ .compatible = "xlnx,cmd-queue-1.0", .data = &zocl_xgq_drvdata},
 	{ /* end of table */ },
 };
 MODULE_DEVICE_TABLE(of, zocl_xgq_of_match);

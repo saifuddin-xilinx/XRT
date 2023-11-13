@@ -13,17 +13,23 @@
 #ifndef _ZOCL_BO_H_
 #define _ZOCL_BO_H_
 
-struct zocl_drm_bo_manager {
-	/* DRM MM node for PL-DDR */
-	struct drm_mm           *zdrm_mem_manager;    i
-	struct mutex             zdrm_mm_lock;
+#include "zocl_drv.h"
 
-	/* Zocl driver memory list head */
-	struct list_head         zdrm_mm_list_head;
+struct zocl_drm_bo_ops {
+        /**
+         * @init: Initialize Memory management here. This will be done once while
+	 * first XCLBIN is downloading.
+         */
+        void (*init)(struct zocl_drm_dev *zdev, void *bo_handlr);
 
-	struct iommu_domain     *zocl_domain;
-	phys_addr_t              zocl_host_mem;
-	resource_size_t          zocl_host_mem_len;
+	/**
+         * @release: Release existing memory management. This will be done if we
+	 * need to reinitialize the cuurent memory manager or driver is unloading.
+         */
+	void (*release)(struct zocl_drm_dev *zdev, void *bo_handlr);
 };
+
+int zocl_bo_memory_register(struct zocl_drm_dev *zdev, void *bo_handlr);
+int zocl_bo_memory_unregister(void *bo_handlr);
 
 #endif

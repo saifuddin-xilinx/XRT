@@ -13,11 +13,9 @@
 #ifndef _ZOCL_XGQ_H_
 #define _ZOCL_XGQ_H_
 
-struct zocl_xgq_dev {
-	/* XGQ platform device list */
-	struct platform_device		*pdev;
-	struct zocl_drm_dev             *zdev_parent;
-	struct list_head                list;
+struct zocl_xgq_drv_data {
+	int (*attach)(struct platform_device *pdev, u32 xgq_id, void *arg);
+	int (*detach)(struct platform_device *pdev, u32 xgq_id);
 };
 
 #endif

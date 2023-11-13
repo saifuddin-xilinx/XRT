@@ -10,12 +10,12 @@
  * License version 2 or Apache License, Version 2.0.
  */
 
-#ifndef _ZOCL_CU_H_
-#define _ZOCL_CU_H_
+#ifndef _ZOCL_PLATFRM_CU_H_
+#define _ZOCL_PLATFRM_CU_H_
 
-struct zocl_cu_dev {
-        /* platform device */
-	struct platform_device		*pdev;
+struct zocl_platfrm_cu_drvdata {
+	int (*config_cu)(struct platform_device *pdev, u32 cu_id, void *arg);
+	int (*unconfig_cu)(struct platform_device *pdev, u32 cu_id);
 };
 
 #endif
