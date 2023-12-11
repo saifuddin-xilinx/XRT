@@ -11,6 +11,7 @@
  * License version 2 or Apache License, Version 2.0.
  */
 
+#include <linux/device.h>
 #include "zocl_common.h"
 
 #if KERNEL_VERSION(5, 3, 0) <= LINUX_VERSION_CODE
@@ -46,4 +47,14 @@ struct platform_device *zocl_find_pdev(char *name)
 		return NULL;
 
 	return container_of(dev, struct platform_device, dev);
+}
+
+inline struct zocl_drm_dev *
+zocl_get_zdev(void)
+{
+	struct platform_device *pdev = zocl_find_pdev("zyxclmm_drm");
+	if(!pdev)
+		return NULL;
+
+	return platform_get_drvdata(pdev);
 }

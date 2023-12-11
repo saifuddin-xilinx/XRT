@@ -1,49 +1,44 @@
-/* SPDX-License-Identifier: GPL-2.0 OR Apache-2.0 */
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2016-2022 Xilinx, Inc. All rights reserved.
- * Copyright (C) 2022 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
  *
- * Author(s):
- *        Min Ma <min.ma@xilinx.com>
+ * Authors:
+ *	ch.vamshi.krishna@amd.com
+ *	saifuddin.kaijar@amd.com
  *
- * This file is dual-licensed; you may select either the GNU General Public
- * License version 2 or Apache License, Version 2.0.
  */
 
-#ifndef _ZOCL_COMMON_H_
-#define _ZOCL_COMMON_H_
+#ifndef _ZOCL_COMMON_H
+#define _ZOCL_COMMON_H
 
 #include <linux/platform_device.h>
-#include <asm/io.h>
 #include "zocl_drv.h"
+#include "zocl_bo.h"
+#include "zocl_xclbin.h"
+#include "zocl_platfrm_cu.h"
 
-#define ZDEV2PDEV(zdev)			((zdev)->pdev)
+#define zDEV_HANDLR(zdev_handlr)			\
+	((struct zocl_dev *)(zdev_handlr))
+#define aDRV_MEMHNDLR(zdev_handlr)			\
+	((void *)(zDEV_HANDLR(zdev_handlr))->zocl_mm)
+#define aDRV_XCLBINHNDLR(zdev_handlr)			\
+	((void *)(zDEV_HANDLR(zdev_handlr))->zocl_xclbin)
 
-#define zocl_err(dev, fmt, args...)     dev_err(dev, "%s: "fmt, __func__, ##args)
-#define zocl_warn(dev, fmt, args...)    dev_warn(dev, "%s: "fmt, __func__, ##args)
-#define zocl_info(dev, fmt, args...)    dev_info(dev, "%s: "fmt, __func__, ##args)
-#define zocl_dbg(dev, fmt, args...)     dev_dbg(dev, "%s: "fmt, __func__, ##args)
+#define zDEV_LOCK(zdev_handlr)			\
+	mutex_lock(&((struct zocl_dev *)(zdev_handlr))->dev_lock)
+#define zDEV_UNLOCK(zdev_handlr)			\
+	mutex_unlock(&((struct zocl_dev *)(zdev_handlr))->dev_lock)
 
-struct platform_device *zocl_find_pdev(char *name);
+#define ZDEV2PDEV(zdev)					\
+	((struct platform_device *)zdev->pdev)
+#define aDRV_DRMHNDLR(zdrv_handlr)			\
+	((struct drm_device *)(zDEV_HANDLR(zdrv_handlr)->ddev))
+#define aDRM_DRVHNDLR(zdrm_handlr)			\
+	((struct zocl_dev *)(zdrm_handlr)->dev_private)
+#define aDRM_MEMHNDLR(zdrm_handlr)			\
+	((void *)(aDRV_MEMHNDLR(xDRM_DRVHNDLR(zdrm_handlr))))
 
-static inline void reg_write(void __iomem *base, u64 off, u32 val)
-{
-	iowrite32(val, base + off);
-}
+extern struct platform_driver zocl_platfrm_cu_driver;
+inline struct zocl_drm_dev *zocl_get_zdev(void);
 
-static inline u32 reg_read(void __iomem *base, u64 off)
-{
-	return ioread32(base + off);
-}
-
-/* Get the platform device node */
-static inline struct zocl_drm_dev *zocl_get_zdev(void)
-{
-	struct platform_device *pdev = zocl_find_pdev("zyxclmm_drm");
-	if(!pdev)
-		return NULL;
-
-	return platform_get_drvdata(pdev);
-}
-
-#endif
+#endif /* endif of _ZOCL_COMMON_H */

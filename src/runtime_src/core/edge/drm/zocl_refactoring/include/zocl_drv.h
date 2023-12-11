@@ -19,6 +19,11 @@
 #include <linux/version.h>
 #include <linux/list.h>
 
+#define zocl_err(dev, fmt, args...)     dev_err(dev, "%s: "fmt, __func__, ##args)
+#define zocl_warn(dev, fmt, args...)    dev_warn(dev, "%s: "fmt, __func__, ##args)
+#define zocl_info(dev, fmt, args...)    dev_info(dev, "%s: "fmt, __func__, ##args)
+#define zocl_dbg(dev, fmt, args...)     dev_dbg(dev, "%s: "fmt, __func__, ##args)
+
 /* Platform device driver declaration */
 extern struct platform_driver zocl_xgq_driver;
 extern struct platform_driver zocl_ospi_versal_driver;
