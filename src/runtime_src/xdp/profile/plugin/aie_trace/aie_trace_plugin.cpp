@@ -1,18 +1,5 @@
-/**
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. - All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the "License"). You may
- * not use this file except in compliance with the License. A copy of the
- * License is located at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
- * License for the specific language governing permissions and limitations
- * under the License.
- */
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved
 
 #define XDP_PLUGIN_SOURCE
 
@@ -112,6 +99,15 @@ void AieTracePluginUnified::updateAIEDevice(void *handle, bool hw_context_flow) 
       "AIE Trace: A previous partition has already been configured. Skipping current partition due to 'config_one_partition=true' setting.");
     return;
   }
+
+  if (hw_context_flow) {
+    xrt::hw_context ctx = xrt_core::hw_context_int::create_hw_context_from_implementation(handle);
+    if (xrt_core::hw_context_int::get_elf_flow(ctx)) {
+      xrt_core::message::send(xrt_core::message::severity_level::warning, "XRT",
+          "AIE Event Trace is not yet supported for Full ELF flow.");
+      return;
+    }
+  }
   
   auto device = util::convertToCoreDevice(handle, hw_context_flow);
 #if ! defined (XRT_X86_BUILD) && ! defined (XDP_CLIENT_BUILD)
@@ -145,7 +141,7 @@ void AieTracePluginUnified::updateAIEDevice(void *handle, bool hw_context_flow) 
   (db->getStaticInfo()).setDeviceName(deviceID, "win_device");  
 #else
     if((db->getStaticInfo()).getAppStyle() == xdp::AppStyle::REGISTER_XCLBIN_STYLE)
-      (db->getStaticInfo()).updateDeviceFromCoreDevice(deviceID, device, true, std::move(std::make_unique<HalDevice>(device->get_device_handle())));
+      (db->getStaticInfo()).updateDeviceFromCoreDeviceHwCtxFlow(deviceID, device, handle, hw_context_flow, true, std::move(std::make_unique<HalDevice>(device->get_device_handle())));
     else
       (db->getStaticInfo()).updateDeviceFromHandle(deviceID, std::move(std::make_unique<HalDevice>(handle)), handle);
 #endif
@@ -227,7 +223,7 @@ void AieTracePluginUnified::updateAIEDevice(void *handle, bool hw_context_flow) 
   // This is applicable only for register xclbin flow.
   if ((db->getStaticInfo()).getAppStyle() == xdp::AppStyle::REGISTER_XCLBIN_STYLE &&
           isPLIO && !isGMIO && configuredOnePlioPartition) {
-    xrt_core::message::send(severity_level::warning, "XRT",
+    xrt_core::message::send(severity_level::critical, "XRT",
       "AIE Trace: PLIO offload is not supported on multiple partitions at once. "
       "A previous PLIO partition has already been configured. "
       "Skipping current PLIO partition.");
@@ -261,7 +257,7 @@ void AieTracePluginUnified::updateAIEDevice(void *handle, bool hw_context_flow) 
   uint64_t aieTraceBufSize = GetTS2MMBufSize(true /*isAIETrace*/);
   // uint64_t aieTraceBufSizePLIO = aieTraceBufSize;
   // uint64_t aieTraceBufSizeGMIO = aieTraceBufSize;
-  if (isPLIO) {
+  if (isPLIO && !configuredOnePlioPartition) {
 
     XAie_DevInst* devInst = static_cast<XAie_DevInst*>(AIEData.implementation->setAieDeviceInst(handle, deviceID));
     if(!devInst) {

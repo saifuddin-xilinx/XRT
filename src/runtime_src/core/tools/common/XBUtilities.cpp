@@ -812,12 +812,10 @@ extract_artifacts_from_archive(const xrt_core::archive* archive,
   for (const auto& artifact_name : artifact_names) {
     try {
       std::string artifact_data = archive->data(artifact_name);
-      // Convert string to vector<char> for artifacts_repository
       std::vector<char> artifact_binary(artifact_data.begin(), artifact_data.end());
       artifacts_repo[artifact_name] = std::move(artifact_binary);
-    }
-    catch (const std::exception& /*e*/) {
-      //Empty artifact will be ignored
+    } catch (const std::exception& /*e*/) {
+      //Ignore files that are not found
     }
   }
   return artifacts_repo;

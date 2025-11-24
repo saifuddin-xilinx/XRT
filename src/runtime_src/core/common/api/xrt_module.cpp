@@ -5,6 +5,7 @@
 #define XRT_CORE_COMMON_SOURCE // in same dll as core_common
 #include "core/common/config_reader.h"
 #include "core/common/message.h"
+#include "core/common/time.h"
 #include "xrt/experimental/xrt_module.h"
 #include "xrt/experimental/xrt_aie.h"
 #include "xrt/experimental/xrt_elf.h"
@@ -303,7 +304,7 @@ private:
 
     base_address += patch + ddr_aie_addr_offset;
     bd_data_ptr[2] = (uint32_t)(base_address & 0xFFFFFFFF);                                  // NOLINT
-    bd_data_ptr[1] = (bd_data_ptr[0] & 0xFE000000) | ((base_address >> 32) & 0x1FFFFFF);     // NOLINT
+    bd_data_ptr[1] = (bd_data_ptr[1] & 0xFE000000) | ((base_address >> 32) & 0x1FFFFFF);     // NOLINT
   }
 
   template<typename T>
@@ -811,6 +812,16 @@ public:
   {
     throw std::runtime_error("Not supported");
   }
+
+  // function to check if the module is created from a full ELF
+  virtual bool
+  is_full_elf_module() const
+  {
+    // This function is not applicable for child classes
+    // like module_userptr and module_sram
+    // So throwing exception here.
+    throw std::runtime_error("Not Applicable");
+  }
 };
 
 // class module_userptr - Opaque userptr provided by application
@@ -1213,6 +1224,12 @@ public:
 
     throw std::runtime_error(
         std::string{"Unable to get arg patcher for index: " + std::to_string(id)});
+  }
+
+  bool
+  is_full_elf_module() const override
+  {
+    return m_elf.is_full_elf();
   }
 };
 
@@ -2158,7 +2175,12 @@ class module_sram : public module_impl
     // patch it in instruction buffer
     for (const auto& [name, ctrlpktbo] : m_ctrlpkt_bos) {
       // symbol name will be same as section name without the grp idx
-      auto sym_name = name.substr(0, name.rfind('.'));
+      // if sec name is .ctrlpkt-57.grp_idx then sym name is .ctrlpkt-57
+      auto dot_pos = name.rfind('.');
+      auto sym_name = (dot_pos != std::string::npos && dot_pos > 0)
+                    ? name.substr(0, dot_pos)
+                    : name;
+
       if (patch_instr_value(m_buffer, sym_name, std::numeric_limits<size_t>::max(), ctrlpktbo.address(),
                             xrt_core::patcher::buf_type::ctrltext, m_ctrl_code_id))
         m_patched_args.insert(sym_name);
@@ -2827,7 +2849,11 @@ public:
     try {
       // dtrace output is dumped into current working directory
       // output is a python file
-      auto result_file_path = std::filesystem::current_path().string() + "/dtrace_dump_" + std::to_string(get_id()) + ".py";
+      std::string result_file_path = std::filesystem::current_path().string()
+                                   + "/dtrace_dump_"
+                                   + xrt_core::get_timestamp_for_filename()
+                                   + "_" + std::to_string(get_id()) + ".py";
+
       get_dtrace_result_file(result_file_path.c_str());
 
       xrt_core::message::send(xrt_core::message::severity_level::debug, "xrt_module",
@@ -3042,6 +3068,12 @@ get_ctrlpkt_data(const xrt::module& module, uint32_t ctrl_code_id)
   catch (...) {
     return {}; // returns empty buffer
   }
+}
+
+bool
+is_full_elf_module(const xrt::module& module)
+{
+  return module.get_handle()->is_full_elf_module();
 }
 
 } // xrt_core::module_int
