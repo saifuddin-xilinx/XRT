@@ -8,6 +8,7 @@
 #include "core/common/time.h"
 #include "tools/common/SmiWatchMode.h"
 #include "tools/common/Table2D.h"
+#include "tools/common/XBUtilities.h"
 
 // 3rd Party Library - Include Files
 #include <algorithm>
@@ -20,30 +21,6 @@
 
 using bpt = boost::property_tree::ptree;
 using context_health_info = xrt_core::query::context_health_info;
-
-std::unique_ptr<ReportContextHealth>
-ReportContextHealth::
-create_reporter(xrt_core::smi::smi_hardware_config::hardware_type hw_type) const
-{
-  switch (hw_type)
-  {
-  case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f1:
-  case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f2:
-  case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f3:
-  case xrt_core::smi::smi_hardware_config::hardware_type::npu3_B01:
-  case xrt_core::smi::smi_hardware_config::hardware_type::npu3_B02:
-  case xrt_core::smi::smi_hardware_config::hardware_type::npu3_B03:
-    return std::make_unique<ctx_health_npu3>();
-  
-  case xrt_core::smi::smi_hardware_config::hardware_type::stxA0:
-  case xrt_core::smi::smi_hardware_config::hardware_type::stxB0:
-  case xrt_core::smi::smi_hardware_config::hardware_type::stxH:
-  case xrt_core::smi::smi_hardware_config::hardware_type::krk1:
-  case xrt_core::smi::smi_hardware_config::hardware_type::phx:
-  default:
-    return std::make_unique<ctx_health_strx>();
-  }
-}
 
 void
 ReportContextHealth::
@@ -62,7 +39,7 @@ getPropertyTree20202(const xrt_core::device* dev, bpt& pt) const
 
   try {
     // For property tree generation, always get all contexts
-    auto context_health_data = xrt_core::device_query<xrt_core::query::context_health_info>(dev);
+    auto context_health_data = xrt_core::device_query<context_health_info>(dev);
 
     // Group contexts by PID
     std::map<uint64_t, std::vector<context_health_info::smi_context_health>> contexts_by_pid;
@@ -80,12 +57,13 @@ getPropertyTree20202(const xrt_core::device* dev, bpt& pt) const
       for (const auto& context : contexts) {
         bpt context_pt;
         context_pt.put("ctx_id"                     ,context.ctx_id);
-        context_pt.put("txn_op_idx"                 ,context.health_data_v1.aie2.txn_op_idx);
-        context_pt.put("ctx_pc"                     ,context.health_data_v1.aie2.ctx_pc);
-        context_pt.put("fatal_error_type"           ,context.health_data_v1.aie2.fatal_error_type);
-        context_pt.put("fatal_error_exception_type" ,context.health_data_v1.aie2.fatal_error_exception_type);
-        context_pt.put("fatal_error_exception_pc"   ,context.health_data_v1.aie2.fatal_error_exception_pc);
-        context_pt.put("fatal_error_app_module"     ,context.health_data_v1.aie2.fatal_error_app_module);
+        const auto* health = reinterpret_cast<const ert_ctx_health_data_v1*>(context.health_data_raw.data());
+        context_pt.put("txn_op_idx"                 ,health->aie2.txn_op_idx);
+        context_pt.put("ctx_pc"                     ,health->aie2.ctx_pc);
+        context_pt.put("fatal_error_type"           ,health->aie2.fatal_error_type);
+        context_pt.put("fatal_error_exception_type" ,health->aie2.fatal_error_exception_type);
+        context_pt.put("fatal_error_exception_pc"   ,health->aie2.fatal_error_exception_pc);
+        context_pt.put("fatal_error_app_module"     ,health->aie2.fatal_error_app_module);
         contexts_array.push_back(std::make_pair("", context_pt));
       }
       pid_pt.add_child("contexts", contexts_array);
@@ -232,14 +210,15 @@ generate_report(const xrt_core::device* dev,
 
       // Add data rows for this PID
       for (const auto& context : contexts) {
+        const auto* health = reinterpret_cast<const ert_ctx_health_data_v1*>(context.health_data_raw.data());
         const std::vector<std::string> entry_data = {
           (boost::format("%d")   % context.ctx_id).str(),
-          (boost::format("0x%x") % context.health_data_v1.aie2.txn_op_idx).str(),
-          (boost::format("0x%x") % context.health_data_v1.aie2.ctx_pc).str(),
-          (boost::format("0x%x") % context.health_data_v1.aie2.fatal_error_type).str(),
-          (boost::format("0x%x") % context.health_data_v1.aie2.fatal_error_exception_type).str(),
-          (boost::format("0x%x") % context.health_data_v1.aie2.fatal_error_exception_pc).str(),
-          (boost::format("0x%x") % context.health_data_v1.aie2.fatal_error_app_module).str()
+          (boost::format("0x%x") % health->aie2.txn_op_idx).str(),
+          (boost::format("0x%x") % health->aie2.ctx_pc).str(),
+          (boost::format("0x%x") % health->aie2.fatal_error_type).str(),
+          (boost::format("0x%x") % health->aie2.fatal_error_exception_type).str(),
+          (boost::format("0x%x") % health->aie2.fatal_error_exception_pc).str(),
+          (boost::format("0x%x") % health->aie2.fatal_error_app_module).str()
         };
         context_table.addEntry(entry_data);
       }
@@ -307,7 +286,8 @@ generate_report(const xrt_core::device* dev,
       // Add data rows for this PID - NPU3 specific fields using AIE4 structure
       for (const auto& context : contexts) {
         // NPU3 uses AIE4 structure which has per-microcontroller data
-        const auto& aie4_data = context.health_data_v1.aie4;
+        const auto* health = reinterpret_cast<const ert_ctx_health_data_v1*>(context.health_data_raw.data());
+        const auto& aie4_data = health->aie4;
         
         if (aie4_data.num_uc == 0) {
           // No microcontroller data available
@@ -362,7 +342,11 @@ writeReport(const xrt_core::device* device,
   xrt_core::smi::smi_hardware_config smi_hrdw;
   auto hardware_type = smi_hrdw.get_hardware_type(pcie_id);
 
-  auto reporter = create_reporter(hardware_type);
+  std::unique_ptr<ReportContextHealth> reporter;
+  if (XBUtilities::is_strix_hardware(hardware_type))
+    reporter = std::make_unique<ctx_health_strx>();
+  else
+    reporter = std::make_unique<ctx_health_npu3>();
 
   // Parse context_id/pid pairs from elements_filter
   std::vector<std::pair<uint64_t, uint64_t>> context_pid_pairs = parse_context_pid_pairs(elements_filter);
