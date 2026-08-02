@@ -1,5 +1,5 @@
-// PDX-License-Identifier: Apache-2.0
-// Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #ifndef XRT_COMMON_API_HW_CONTEXT_INT_H
 #define XRT_COMMON_API_HW_CONTEXT_INT_H
 
@@ -10,11 +10,12 @@
 #include "core/include/xrt/experimental/xrt_module.h"
 
 #include <cstdint>
+#include <string>
 
 // Provide access to xrt::xclbin data that is not directly exposed
 // to end users via xrt::xclbin.   These functions are used by
 // XRT core implementation.
-namespace xrt_core { namespace hw_context_int {
+namespace xrt_core::hw_context_int {
 
 // Get the core_device from this context
 // Exported for xdp access
@@ -45,16 +46,27 @@ XRT_CORE_COMMON_EXPORT
 xrt::hw_context
 create_hw_context_from_implementation(void* hwctx_impl);
 
-// Checks all the modules that are registered with given hw context
-// and returns the module with the given kernel name
-// throws if no module is found with given kernel name
-xrt::module
-get_module(const xrt::hw_context& hwctx, const std::string& kname);
+// Checks all the ELFs that are registered with given hw context
+// and returns the ELF with the given kernel name
+// throws if no ELF is found with given kernel name
+xrt::elf
+get_elf(const xrt::hw_context& hwctx, const std::string& kname);
+
+// get_config_elfs() - Return list of configuration elfs for hwctx
+// In non-elf flow, this function return empty set.
+std::vector<xrt::elf>
+get_config_elfs(const xrt::hw_context& hwctx);
 
 // Get the partition size (number of columns).  May not be available
 // in xclbin mode.
+XRT_CORE_COMMON_EXPORT
 size_t
 get_partition_size(const xrt::hw_context&);
+
+// Get the number of controllers.
+XRT_CORE_COMMON_EXPORT
+size_t
+get_num_uc(const xrt::hw_context&);
 
 // get_elf_flow() - Returns true if hwctx was created with elf file/flow
 // Returns false everywhere else
@@ -74,14 +86,39 @@ dump_scratchpad_mem(const xrt::hw_context& hwctx);
 void
 dump_uc_log_buffer(const xrt::hw_context& hwctx);
 
+// Append a per-run dtrace JSON result to the hw context coalesce buffer
+void
+append_dtrace_result(const xrt::hw_context& hwctx, 
+                     const std::string& key, const std::string& result_json);
+
 // Returns map of kernel names to their corresponding elf files
 // registered with the hardware context.
 // This is used by XDP to get the ELF files registered with
 // the hardware context.
+// Returns by value to ensure thread safety
 XRT_CORE_COMMON_EXPORT
-const std::map<std::string, xrt::elf>&
+std::map<std::string, xrt::elf>
 get_elf_map(const xrt::hw_context& hwctx);
 
-}} // hw_context_int, xrt_core
+// Get the configuration parameter / QoS map from the hw context.
+// The returned map contains key-value pairs
+// key: string, value: uint32_t for both QoS-related settings and
+// other hw context configuration parameters.
+// Throws std::runtime_error if the context currently does not store cfg_param_type
+XRT_CORE_COMMON_EXPORT
+xrt::hw_context::qos_type
+get_qos_map(const xrt::hw_context& hwctx);
+
+// get_cfg_map() - Get the configuration parameters
+//
+// The returned map contains string to string key-value pairs both
+// QoS-related settings and other hw context configuration parameters.
+// If hwctx was configured with string to integral key-value pairs,
+// then the integral values are converted to strings.
+XRT_CORE_COMMON_EXPORT
+xrt::hw_context::cfg_type
+get_cfg_map(const xrt::hw_context& hwctx);
+
+} // xrt_core::hw_context_int
 
 #endif

@@ -7,6 +7,7 @@
 #include "TestValidateUtilities.h"
 #include "tools/common/XBUtilities.h"
 #include "core/common/runner/runner.h"
+#include "core/common/unistd.h"
 #include "core/common/json/nlohmann/json.hpp"
 #include "core/common/archive.h"
 #include "core/common/info_telemetry.h"
@@ -37,21 +38,23 @@ get_total_frame_events(const std::shared_ptr<xrt_core::device>& dev)
   return total_frame_events;
 }
 
-boost::property_tree::ptree 
+boost::property_tree::ptree
 TestTemporalSharingOvd::
-run(const std::shared_ptr<xrt_core::device>&)
+run(const std::shared_ptr<xrt_core::device>& dev,
+    const xrt_core::archive* archive)
 {
   boost::property_tree::ptree ptree = get_test_header();
-  return ptree;
-}
-
-boost::property_tree::ptree TestTemporalSharingOvd::run(const std::shared_ptr<xrt_core::device>& dev, const xrt_core::archive* archive)
-{
-  boost::property_tree::ptree ptree = get_test_header();
+  // This test requires telemetry counters which require admin privileges
+  if(!xrt_core::is_user_privileged()) {
+    XBValidateUtils::logger(ptree, "Details", "This test requires admin privileges");
+    ptree.put("status", XBValidateUtils::test_token_skipped);
+    return ptree;
+  }
   
   if (archive == nullptr) {
-    XBValidateUtils::logger(ptree, "Info", "No archive provided, falling back to standard method");
-    return run(dev);
+    ptree.put("status", XBValidateUtils::test_token_failed);
+    XBValidateUtils::logger(ptree, "Error", "No archive found, skipping test");
+    return ptree;
   }
   
   try {

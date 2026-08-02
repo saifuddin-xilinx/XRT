@@ -52,12 +52,6 @@ static char driver_date[9];
 #define VM_RESERVED (VM_DONTEXPAND | VM_DONTDUMP)
 #endif
 
-#if KERNEL_VERSION(6, 13, 0) > LINUX_VERSION_CODE
-MODULE_IMPORT_NS(DMA_BUF);
-#else
-MODULE_IMPORT_NS("DMA_BUF");
-#endif
-
 int enable_xgq_ert = 1;
 module_param(enable_xgq_ert, int, (S_IRUGO|S_IWUSR));
 MODULE_PARM_DESC(enable_xgq_ert, "0 = legacy ERT mode, 1 = XGQ ERT mode (default)");
@@ -230,7 +224,6 @@ static int zocl_pr_slot_init(struct drm_zocl_dev *zdev,
 
 		zocl_slot->partial_overlay_id = -1;
 		zocl_slot->slot_idx = i;
-		zocl_slot->slot_type = ZOCL_SLOT_TYPE_PHY;
 		zocl_slot->hwctx_ref_cnt = 0;
 
 		zdev->pr_slot[i] = zocl_slot;
@@ -251,7 +244,6 @@ static int zocl_pr_slot_init(struct drm_zocl_dev *zdev,
 		mutex_init(&zocl_slot->aie_lock);
 
 		zocl_slot->slot_idx = i;
-		zocl_slot->slot_type = ZOCL_SLOT_TYPE_VIRT;
 
 		zdev->pr_slot[i] = zocl_slot;
 	}
@@ -416,6 +408,31 @@ int get_apt_index_by_addr(struct drm_zocl_dev *zdev, phys_addr_t addr)
 	/* Haven't consider search efficiency yet. */
 	for (i = 0; i < zdev->cu_subdev.num_apts; ++i)
 		if (apts[i].addr == addr)
+			break;
+	mutex_unlock(&zdev->cu_subdev.lock);
+
+	return (i == zdev->cu_subdev.num_apts) ? -EINVAL : i;
+}
+
+/**
+ * Get the aperture index matching both a physical address and slot index.
+ * Used when multiple slots may contain IPs at the same address.
+ *
+ * @param	zdev:     zocl device struct
+ * @param	addr:     physical address of the aperture
+ * @param	slot_idx: slot index to match
+ *
+ * Returns the index if aperture was found, -EINVAL if not found.
+ */
+int get_apt_index_by_addr_and_slot(struct drm_zocl_dev *zdev,
+				   phys_addr_t addr, int slot_idx)
+{
+	struct addr_aperture *apts = zdev->cu_subdev.apertures;
+	int i;
+
+	mutex_lock(&zdev->cu_subdev.lock);
+	for (i = 0; i < zdev->cu_subdev.num_apts; ++i)
+		if (apts[i].addr == addr && apts[i].slot_idx == slot_idx)
 			break;
 	mutex_unlock(&zdev->cu_subdev.lock);
 
@@ -1048,8 +1065,12 @@ static int zocl_iommu_init(struct drm_zocl_dev *zdev,
 	struct iommu_domain_geometry *geometry;
 	u64 start, end;
 	int ret;
-
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
+	zdev->domain = iommu_paging_domain_alloc(&pdev->dev);
+#else
 	zdev->domain = iommu_domain_alloc(&platform_bus_type);
+#endif
+
 	if (!zdev->domain)
 		return -ENOMEM;
 
@@ -1243,7 +1264,9 @@ static struct drm_driver zocl_driver = {
 	.fops                      = &zocl_driver_fops,
 	.name                      = ZOCL_DRIVER_NAME,
 	.desc                      = ZOCL_DRIVER_DESC,
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 14, 0)
 	.date                      = driver_date,
+#endif
 };
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)
@@ -1431,7 +1454,11 @@ static int zocl_drm_platform_probe(struct platform_device *pdev)
 		goto err_drm;
 
 	/* Initialzie IOMMU */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
+	if (device_iommu_mapped(&pdev->dev)) {
+#else
 	if (iommu_present(&platform_bus_type)) {
+#endif
 		/*
 		 * Note: we ignore the return value of zocl_iommu_init().
 		 * In the case of failing to initialize iommu, zocl
@@ -1603,7 +1630,6 @@ static int __init zocl_init(void)
 		platform_driver_unregister(drivers[i]);
 	return ret;
 }
-module_init(zocl_init);
 
 static void __exit zocl_exit(void)
 {
@@ -1612,10 +1638,17 @@ static void __exit zocl_exit(void)
 	while (--i >= 0)
 		platform_driver_unregister(drivers[i]);
 }
+
+module_init(zocl_init);
 module_exit(zocl_exit);
 
 MODULE_VERSION(XRT_DRIVER_VERSION","XRT_HASH);
-
 MODULE_DESCRIPTION(ZOCL_DRIVER_DESC);
 MODULE_AUTHOR("Sonal Santan <sonal.santan@xilinx.com>");
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
+MODULE_IMPORT_NS("DMA_BUF");
+#else
+MODULE_IMPORT_NS(DMA_BUF);
+#endif

@@ -10,6 +10,7 @@
 #include "core/common/query_requests.h"
 #include "tools/common/SmiWatchMode.h"
 #include "core/common/json/nlohmann/json.hpp"
+#include "../OutputStreamHelper.h"
 
 // 3rd Party Library - Include Files
 #include <boost/program_options.hpp>
@@ -27,19 +28,22 @@ namespace po = boost::program_options;
 // ----- C L A S S   M E T H O D S -------------------------------------------
 
 OO_EventTraceExamine::OO_EventTraceExamine( const std::string &_longName, bool _isHidden )
-    : OptionOptions(_longName, _isHidden, "Watch event trace data")
+    : OptionOptions(_longName, _isHidden, "Status|watch event trace data")
     , m_device("")
     , m_help(false)
     , m_watch(false)
-    , m_raw(false)
+    , m_raw(std::nullopt)
     , m_version(false)
+    , m_status(false)
     , m_watch_mode_offset(0)
 {
   m_optionsDescription.add_options()
     ("device,d", boost::program_options::value<decltype(m_device)>(&m_device), "The Bus:Device.Function (e.g., 0000:d8:00.0) device of interest")
     ("help,h", boost::program_options::bool_switch(&m_help), "Help to use this sub-command")
+    ("status", boost::program_options::bool_switch(&m_status), "Show event trace status")
     ("watch", boost::program_options::bool_switch(&m_watch), "Watch event trace data continuously")
-    ("raw", boost::program_options::bool_switch(&m_raw), "Output raw event trace data (no parsing)")
+    ("raw", boost::program_options::value<std::string>()->notifier([this](const std::string& value) { m_raw = value; })->implicit_value(""),
+            "Output raw event trace data (no parsing). Optionally specify output file. Default is to output to console.")
     ("payload-version", boost::program_options::bool_switch(&m_version), "Show event trace version")
   ;
 }
@@ -65,58 +69,85 @@ handle_version(const xrt_core::device* device) const {
     std::cout << boost::format("  %-20s : %u\n") % "Major" % static_cast<unsigned>(major);
     std::cout << boost::format("  %-20s : %u\n") % "Minor" % static_cast<unsigned>(minor);
   } catch (const std::exception& e) {
-    std::cerr << "Error getting payload version: " << e.what() << std::endl;
-    throw xrt_core::error(std::errc::operation_canceled);
+    throw xrt_core::error(std::errc::operation_canceled, "Error getting payload version: " + std::string(e.what()));
+  }
+}
+
+void
+OO_EventTraceExamine::
+handle_status(const xrt_core::device* device) const {
+  try {
+    auto status = xrt_core::device_query<xrt_core::query::event_trace_state>(device);
+    std::cout << "Event trace status: " << (status.action == 1 ? "enabled" : "disabled") << "\n"; //NOLINT
+    
+    auto category_names = smi::event_trace_config::mask_to_category_names(status.categories, device);
+    if (!category_names.empty()) {
+      std::cout << "Event trace categories: ";
+      for (size_t i = 0; i < category_names.size(); ++i) { //NOLINT
+        if (i > 0) std::cout << ", "; //NOLINT
+        std::cout << category_names[i];
+      }
+      std::cout << "\n";
+    } else {
+      std::cout << "Event trace categories: none\n";
+    }
+  } catch (const std::exception& e) {
+    throw xrt_core::error(std::errc::operation_canceled, 
+        "Error getting event trace status: " + std::string(e.what()));
   }
 }
 
 void
 OO_EventTraceExamine::
 handle_logging(const xrt_core::device* device) const {
+  // Use helper to manage output stream
+  XBUtilities::OutputStreamHelper output_helper(m_raw);
+  std::ostream& out = output_helper.get_stream();
+
   // Load configuration unless raw mode is requested
   std::unique_ptr<smi::event_trace_config> config;
-  if (!m_raw) {
+  if (!output_helper.is_raw_mode()) {
     try {
       config = smi::event_trace_config::create_from_device(device);
     } catch (const std::exception& e) {
-      std::cerr << "[Error] Configuration loading failed: " << e.what() << std::endl;
+      out << "[Error] Configuration loading failed: " << e.what() << std::endl;
       return;
     }
   }
 
   // Handle raw mode version display
-  if (m_raw) {
+  if (output_helper.is_raw_mode()) {
     dump_raw_version(device);
   }
 
   if (m_watch) {
-    if (!m_raw && config) {
+    if (!output_helper.is_raw_mode() && config) {
       auto parser = smi::event_trace_parser::create_from_config(config, device);
-      std::cout << add_header();
+      out << parser->get_header_row();
       
       auto report_generator = [this, &parser](const xrt_core::device* dev) -> std::string {
         return generate_parsed_logs(dev, parser, true);
       };
-      smi_watch_mode::run_watch_mode(device, std::cout, report_generator);
+      smi_watch_mode::run_watch_mode(device, out, report_generator, 0, false);
     } else {
       // Raw mode: no parser needed
       auto report_generator = [this](const xrt_core::device* dev) -> std::string {
         return generate_raw_logs(dev, true);
       };
-      smi_watch_mode::run_watch_mode(device, std::cout, report_generator);
+      smi_watch_mode::run_watch_mode(device, out, report_generator, 0, false);
     }
   } else {
-    if (m_raw || !config) {
-      std::cout << generate_raw_logs(device, false);
+    if (output_helper.is_raw_mode() || !config) {
+      out << generate_raw_logs(device, false);
     } else {
-      std::cout << "Event Trace Logs\n";
-      std::cout << "==================\n\n";
-      std::cout << add_header();
-      
+      out << "Event Trace Logs\n";
+      out << "==================\n\n";
       auto parser = smi::event_trace_parser::create_from_config(config, device);
-      std::cout << generate_parsed_logs(device, parser, false);
+      out << parser->get_header_row();
+      out << generate_parsed_logs(device, parser, false);
     }
   }
+  // output_helper destructor automatically flushes and closes the file
 }
 
 std::string
@@ -134,10 +165,8 @@ generate_parsed_logs(const xrt_core::device* device,
     
     m_watch_mode_offset = data_buf.abs_offset;
 
-    if (!data_buf.data) {
-      ss << "No event trace data available\n";
+    if (!data_buf.data)
       return ss.str();
-    }
 
     auto* data_ptr = static_cast<const uint8_t*>(data_buf.data);
     auto buf_size = data_buf.size;
@@ -165,7 +194,6 @@ generate_raw_logs(const xrt_core::device* dev,
     m_watch_mode_offset = data_buf.abs_offset;
     
     if (!data_buf.data || data_buf.size == 0) {
-      ss << "No event trace data available\n";
       return ss.str();
     }
 
@@ -177,22 +205,6 @@ generate_raw_logs(const xrt_core::device* dev,
   catch (const std::exception& e) {
     ss << "Error retrieving raw event trace data: " << e.what() << "\n";
   }
-  return ss.str();
-}
-
-std::string
-OO_EventTraceExamine::
-add_header() const
-{
-  std::stringstream ss{};
-  
-  // Format table header with proper spacing
-  ss << boost::format("%-20s %-25s %-25s %-30s\n") //NOLINT (cppcoreguidelines-avoid-magic-numbers)
-        % "Timestamp" 
-        % "Event Name" 
-        % "Category" 
-        % "Arguments";
-  
   return ss.str();
 }
 
@@ -211,6 +223,7 @@ void
 OO_EventTraceExamine::execute(const SubCmdOptions& _options) const
 {
   XBUtilities::verbose("SubCommand option: Event Trace Examine");
+  XBUtilities::sudo_or_throw("Event tracing requires admin privileges");
 
   XBUtilities::verbose("Option(s):");
   for (auto & aString : _options)
@@ -225,9 +238,7 @@ OO_EventTraceExamine::execute(const SubCmdOptions& _options) const
     po::command_line_parser parser(_options);
     XBUtilities::process_arguments(vm, parser, all_options, m_positionalOptions, true);
   } catch(boost::program_options::error& ex) {
-    std::cout << ex.what() << std::endl;
-    printHelp();
-    throw xrt_core::error(std::errc::operation_canceled);
+    throw xrt_core::error(std::errc::operation_canceled, ex.what());
   } 
 
   if (m_help)
@@ -241,12 +252,16 @@ OO_EventTraceExamine::execute(const SubCmdOptions& _options) const
     device = XBUtilities::get_device(boost::algorithm::to_lower_copy(m_device), true /*inUserDomain*/);
   } catch (const std::runtime_error& e) {
     // Catch only the exceptions that we have generated earlier
-    std::cerr << boost::format("ERROR: %s\n") % e.what();
-    throw xrt_core::error(std::errc::operation_canceled);
+    throw xrt_core::error(std::errc::operation_canceled, "ERROR: " + std::string(e.what()));
   }
 
   if (m_version) {
     handle_version(device.get());
+    return;
+  }
+
+  if (m_status) {
+    handle_status(device.get());
     return;
   }
 

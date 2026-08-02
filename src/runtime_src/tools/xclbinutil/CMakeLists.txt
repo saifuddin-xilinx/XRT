@@ -101,8 +101,16 @@ file(GLOB XCLBINUTIL_MAIN_FILE
 )
 set(XCLBINUTIL_SRCS ${XCLBINUTIL_MAIN_FILE} ${XCLBINUTIL_FILES_SRCS})
 
+
 xrt_configure_version_file(${XCLBINUTIL_NAME} APP)
 add_executable(${XCLBINUTIL_NAME} ${XCLBINUTIL_NAME}-version.rc ${XCLBINUTIL_SRCS})
+
+if (ENABLE_ASAN)
+  # xclbinutil links static Boost (/MT). Override the global MultiThreadedDLL
+  # set by ASAN so the object files match the Boost libraries' CRT metadata.
+  set_target_properties(${XCLBINUTIL_NAME} PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
 
 # Signing xclbin images currently is not support on windows
 if(NOT WIN32)
@@ -239,7 +247,7 @@ if (GTEST_FOUND AND NOT XRT_SYSTEM_INSTALL)
   add_executable(${UNIT_TEST_NAME} ${XCLBINTEST_SRCS})
 
   if(WIN32)
-    target_link_libraries(${UNIT_TEST_NAME} PRIVATE Boost::program_options Boost::system )
+    target_link_libraries(${UNIT_TEST_NAME} PRIVATE ${Boost_LIBRARIES})
     target_link_libraries(${UNIT_TEST_NAME} PRIVATE ${GTEST_BOTH_LIBRARIES})
   else()
     target_link_libraries(${UNIT_TEST_NAME} PRIVATE ${Boost_LIBRARIES} ${GTEST_BOTH_LIBRARIES} pthread crypto)

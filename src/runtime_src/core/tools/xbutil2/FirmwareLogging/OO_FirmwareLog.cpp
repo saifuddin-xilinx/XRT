@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 
 // ------ I N C L U D E   F I L E S -------------------------------------------
 // Local - Include Files
@@ -23,7 +23,7 @@ OO_FirmwareLog::OO_FirmwareLog( const std::string &_longName, bool _isHidden )
     , m_enable(false)
     , m_disable(false)
     , m_help(false)
-    , m_log_level(0)
+    , m_log_level(2)
 {
   m_optionsDescription.add_options()
     ("device,d", boost::program_options::value<decltype(m_device)>(&m_device), "The Bus:Device.Function (e.g., 0000:d8:00.0) device of interest")
@@ -50,6 +50,7 @@ void
 OO_FirmwareLog::execute(const SubCmdOptions& _options) const
 {
   XBUtilities::verbose("SubCommand option: Firmware Log");
+  XBUtilities::sudo_or_throw("Firmware logging requires admin privileges");
 
   XBUtilities::verbose("Option(s):");
   for (auto & aString : _options)
@@ -97,9 +98,6 @@ OO_FirmwareLog::execute(const SubCmdOptions& _options) const
   }
 
   if (m_enable || m_disable) {
-    // Configuration actions require admin privileges
-    XBUtilities::sudo_or_throw("Firmware log configuration requires admin privileges");
-
     uint32_t action_value = m_enable ? 1 : 0;
     std::string action_name = m_enable ? "enable" : "disable";
 

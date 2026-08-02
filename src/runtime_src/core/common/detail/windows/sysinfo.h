@@ -1,27 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-// Local - Include files
+// Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 #include "core/common/error.h"
 
-// System - Include Files
-#include <windows.h>
 #include <string>
-#include <locale>
-#include <codecvt>
 #include <thread>
-#include <comdef.h>
-#include <wbemidl.h>
+#include <array>
 
-#pragma comment(lib, "wbemuuid.lib")
-
-// 3rd Party Library - Include Files
 #include <boost/property_tree/ptree.hpp>
 #include <boost/format.hpp>
 
-#ifdef _WIN32
-# pragma warning (disable : 4996)
+// Exclude rarely-used headers (e.g. Winsock) from <windows.h> for
+// faster builds and fewer conflicts.
+#ifndef WIN32_LEAN_AND_MEAN
+# define WIN32_LEAN_AND_MEAN
 #endif
+#define NOMINMAX
+#include <windows.h>
 
 namespace {
 
@@ -45,6 +39,12 @@ getmachinename()
   case PROCESSOR_ARCHITECTURE_INTEL:
     machine = "x86";
     break;
+  case PROCESSOR_ARCHITECTURE_ARM:
+    machine = "arm";
+    break;
+  case PROCESSOR_ARCHITECTURE_ARM64:
+    machine = "arm64";
+    break;
   case PROCESSOR_ARCHITECTURE_UNKNOWN:
   default:
     machine = "unknown";
@@ -57,100 +57,44 @@ getmachinename()
 static std::string
 getmachinedistribution()
 {
-  HRESULT hres;
-
-  // Initialize COM
-  hres = CoInitializeEx(NULL, COINIT_MULTITHREADED);
-  if (FAILED(hres))
-    throw xrt_core::error("Failed to initialize COM library. Cannot get machine distribution information");
-
-  // Set COM security levels
-  hres = CoInitializeSecurity(
-        NULL, 
-        -1,                          // COM authentication
-        NULL,                        // Authentication services
-        NULL,                        // Reserved
-        RPC_C_AUTHN_LEVEL_DEFAULT,   // Default authentication
-        RPC_C_IMP_LEVEL_IMPERSONATE, // Default Impersonation
-        NULL,                        // Authentication info
-        EOAC_NONE,                   // Additional capabilities
-        NULL                         // Reserved
-        );
-  if (FAILED(hres)) {
-    CoUninitialize();
-    throw xrt_core::error("Failed to initialize security. Cannot get machine distribution information");
+  std::array<char, 128> value{}; //NOLINT(cppcoreguidelines-avoid-magic-numbers)
+  DWORD BufferSize = static_cast<DWORD>(value.size());
+  
+  LONG result = RegGetValueA(
+    HKEY_LOCAL_MACHINE,
+    "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
+    "ProductName",
+    RRF_RT_ANY,
+    NULL,
+    value.data(),
+    &BufferSize
+  );
+  
+  std::string productName(value.data());
+  
+  // Windows 11 detection: Check if build number >= 22000
+  BufferSize = static_cast<DWORD>(value.size());
+  result = RegGetValueA(
+    HKEY_LOCAL_MACHINE,
+    "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
+    "CurrentBuildNumber",
+    RRF_RT_ANY,
+    NULL,
+    value.data(),
+    &BufferSize
+  );
+  
+  if (result == ERROR_SUCCESS) {
+    int buildNumber = std::stoi(std::string(value.data()));
+    // Windows 11 starts at build 22000
+    // https://learn.microsoft.com/en-us/answers/questions/586619/windows-11-build-ver-is-still-10-0-22000-194
+    if (buildNumber >= 22000 && productName.find("Windows 10") != std::string::npos) { //NOLINT(cppcoreguidelines-avoid-magic-numbers)
+      size_t pos = productName.find("Windows 10");
+      productName.replace(pos, 10, "Windows 11"); //NOLINT(cppcoreguidelines-avoid-magic-numbers)
+    }
   }
-
-  // Obtain initial locator to WMI
-  IWbemLocator *pWbemLocator = NULL;
-  hres = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID *) &pWbemLocator);
-  if (FAILED(hres)) {
-    CoUninitialize();
-    throw xrt_core::error("Failed to obtain locator. Cannot get machine distribution information");
-  }
-
-  // Connect to WMI
-  IWbemServices *pWbemServices = NULL;
-  hres = pWbemLocator->ConnectServer(
-         _bstr_t(L"ROOT\\CIMV2"), // Object path of WMI namespace
-         NULL,                    // User name, NULL indicated current in these args
-         NULL,                    // User password
-         0,                       // Locale
-         NULL,                    // Security flags
-         0,                       // Authority
-         NULL,                    // Context object
-         &pWbemServices           // pointer to IWbemServices proxy
-         );
-  if (FAILED(hres)) {
-    pWbemLocator->Release();
-    CoUninitialize();
-    throw xrt_core::error("Failed to connect to WMI. Cannot get machine distribution information");
-  }
-
-  // Make WMI Request
-  IEnumWbemClassObject* pEnum = NULL;
-  hres = pWbemServices->ExecQuery(bstr_t("WQL"), bstr_t(L"Select Caption from Win32_OperatingSystem"), WBEM_FLAG_FORWARD_ONLY, NULL, &pEnum);
-  if (FAILED(hres)) {
-    pWbemServices->Release();
-    pWbemLocator->Release();
-    CoUninitialize();
-    throw xrt_core::error("WMI Query failed. Cannot get machine distribution information");
-  }
-  ULONG uObjectCount = 0;
-  IWbemClassObject *pWmiObject = NULL;
-  hres = pEnum->Next(WBEM_INFINITE, 1, &pWmiObject, &uObjectCount);
-  if (FAILED(hres)) {
-    pWbemServices->Release();
-    pWbemLocator->Release();
-    pEnum->Release();
-    CoUninitialize();
-    throw xrt_core::error("WMI Query failed. Cannot get machine distribution information");
-  }
-  VARIANT cvtDistribution;
-  VariantInit(&cvtDistribution);
-  hres = pWmiObject->Get(L"Caption", 0, &cvtDistribution, 0, 0);
-  if (FAILED(hres)) {
-    VariantClear(&cvtDistribution);
-    pWmiObject->Release();
-    pWbemServices->Release();
-    pWbemLocator->Release();
-    pEnum->Release();
-    CoUninitialize();
-    throw xrt_core::error("WMI Query failed. Cannot get machine distribution information");
-  }
-  _bstr_t bstrValue(cvtDistribution.bstrVal);
-  std::wstring wstrValue(bstrValue);
-  std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
-  std::string distribution = converter.to_bytes(wstrValue);
-
-  // Cleanup
-  VariantClear(&cvtDistribution);
-  pWmiObject->Release();
-  pWbemServices->Release();
-  pWbemLocator->Release();
-  pEnum->Release();
-  CoUninitialize();
-  return distribution;
+  
+  return productName;
 }
 
 static std::string
@@ -158,8 +102,19 @@ osNameImpl()
 {
   OSVERSIONINFO vi;
   vi.dwOSVersionInfoSize = sizeof(vi);
+
+#ifdef _WIN32
+# pragma warning (push)
+# pragma warning (disable : 4996)
+#endif
+
   if (GetVersionEx(&vi) == 0)
     throw xrt_core::error("Cannot get OS version information");
+
+#ifdef _WIN32
+# pragma warning( pop )
+#endif
+
   switch (vi.dwPlatformId)
   {
   case VER_PLATFORM_WIN32s:

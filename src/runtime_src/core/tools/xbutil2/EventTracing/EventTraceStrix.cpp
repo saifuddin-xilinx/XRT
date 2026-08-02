@@ -17,9 +17,7 @@ config_strix(nlohmann::json json_config)
     m_event_bits(parse_event_bits()),
     m_payload_bits(parse_payload_bits()),
     m_arg_templates(parse_arg_sets()),
-    m_event_map(parse_events()),
-    m_entry_header_size(parse_structure_size("ring_buffer_entry_header")),
-    m_entry_footer_size(parse_structure_size("ring_buffer_entry_footer"))
+    m_event_map(parse_events())
 {
 }
 
@@ -51,21 +49,6 @@ parse_payload_bits()
     throw std::runtime_error("Payload bits must be greater than 0");
   }
   return payload_bits_val;
-}
-
-size_t
-config_strix::
-parse_structure_size(const std::string& struct_name)
-{
-  const auto& config = get_config();
-  if (!config.contains("structures") || !config["structures"].contains(struct_name)) {
-    return 0;
-  }
-  const auto& structure = config["structures"][struct_name];
-  if (structure.contains("size")) {
-    return structure["size"].get<size_t>();
-  }
-  return 0;
 }
 
 std::map<std::string, std::vector<config_strix::event_arg_strix>>
@@ -320,8 +303,9 @@ format_value(uint64_t value, const std::string& format) const
 }
 
 parser_strix::
-parser_strix(config_strix config) 
-  : m_config(std::move(config)) {}
+parser_strix(config_strix config)
+  : m_config(std::move(config))
+{}
 
 std::string
 parser_strix::
@@ -329,27 +313,25 @@ parse(const uint8_t* data_ptr, size_t buf_size) const
 {
   std::stringstream ss{};
   
-  if (!data_ptr || buf_size == 0) {
-    return "No event trace data available\n";
-  }
-
   // Get entry header and footer sizes
   size_t entry_header_size = m_config.get_entry_header_size();
   size_t entry_footer_size = m_config.get_entry_footer_size();
   size_t event_data_size = m_config.get_event_size();
   size_t total_entry_size = entry_header_size + event_data_size + entry_footer_size;
   
-  // Parse each entry dynamically based on config sizes
+  std::optional<uint16_t> prev_seq;
   size_t offset = 0;
+  uint16_t sequence = 0;
   while (offset + total_entry_size <= buf_size) {
-    // Skip entry header
     const uint8_t* event_ptr = data_ptr + offset + entry_header_size;
-    // Parse event from buffer using runtime config
     auto event_data = m_config.parse_buffer(event_ptr);
-    
+
+    if (prev_seq)
+      ss << format_sequence_gap(*prev_seq, sequence);
+    prev_seq = sequence;
+    ++sequence;
+
     ss << format_event(event_data);
-    
-    // Move to next entry (skip header + event + footer)
     offset += total_entry_size;
   }
   return ss.str();
@@ -359,39 +341,14 @@ std::string
 parser_strix::
 format_event(const event_data_t& event_data) const
 {
-  std::stringstream ss{};
-  
   auto decoded_event = m_config.decode_event(event_data);
 
-  // Format categories for table
   std::string categories_str = format_categories(decoded_event.categories);
-
-  // Format arguments for table
   std::string args_str = format_arguments(decoded_event.args);
-
-  // Format as table row with consistent column widths
   std::string event_name = decoded_event.name.empty() ? "UNKNOWN" : decoded_event.name;
   std::string category_display = categories_str.empty() ? "UNKNOWN" : categories_str;
-  
-  ss << boost::format("%-20lu %-25s %-25s %-30s\n")//NOLINT (cppcoreguidelines-avoid-magic-numbers) 
-        % event_data.timestamp               // Use parsed timestamp value
-        % event_name                         // Use parsed name or UNKNOWN
-        % category_display                   // Use parsed categories or UNKNOWN
-        % args_str;
-  
-  return ss.str();
-}
 
-std::string
-parser_strix::
-format_summary(size_t event_count, size_t buf_size) const
-{
-  std::stringstream ss{};
-  ss << "Event Trace Summary\n";
-  ss << "===================\n";
-  ss << "Total Events: " << event_count << "\n";
-  ss << "Buffer Size: " << buf_size << " bytes\n\n";
-  return ss.str();
+  return format_event_row(event_data.timestamp, event_name, category_display, args_str);
 }
 
 } // namespace xrt_core::tools::xrt_smi

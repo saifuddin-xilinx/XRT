@@ -20,9 +20,12 @@ namespace xrt_core { class device; }
 
 namespace xrt_core::tools::xrt_smi{
 
-constexpr uint8_t npu3_magic_byte = 0xAA;
-constexpr size_t npu3_timestamp_bytes = 8;
-constexpr size_t npu3_header_bytes = 12; // timestamp(8) + magic(1) + category_id(2) + payload_size(1)
+constexpr uint8_t npu3_rbe_header_magic = 0xCA; // NOLINT This is hardcoded. Ideally this should come from the config json. TODO: remove this once this is a part of json
+constexpr uint8_t npu3_rbe_footer_magic = 0xBA; // NOLINT This is hardcoded. Ideally this should come from the config json. TODO: remove this once this is a part of json
+constexpr size_t npu3_rbe_header_bytes = 8;  // NOLINT RBE header: magic(1) + payload_words(2) + seq_num(2) + reserved(3)
+constexpr size_t npu3_event_header_bytes = 12; // NOLINT Event header: timestamp(8) + unique_id(4)
+constexpr size_t npu3_rbe_footer_bytes = 8;  // NOLINT RBE footer: reserved(3) + seq_num(2) + payload_words(2) + magic(1)
+
 
 /**
  * @brief NPU3-specific event trace configuration
@@ -52,9 +55,10 @@ public:
    */
   struct event_data_t {
     uint64_t timestamp;
-    uint16_t category_id;
+    uint32_t event_id;         // unique_id from event header
     const uint8_t* payload_ptr;
-    uint8_t payload_size;
+    uint8_t payload_words;    // number of 64-bit words (from RBE header, 1 byte)
+    uint16_t sequence_number; // sequence number (from RBE header, 2 bytes)
   };
 
 public:
@@ -63,14 +67,6 @@ public:
    * @param json_config Configuration file
    */
   explicit config_npu3(nlohmann::json json_config);
-
-  /**
-   * @brief Parse NPU3 event from buffer
-   * @param buffer_ptr Pointer to event data
-   * @return Event data structure
-   */
-  event_data_t
-  parse_buffer(const uint8_t* buffer_ptr) const;
 
   /**
    * @brief Decode event into human-readable form
@@ -169,8 +165,9 @@ public:
         size_t buf_size) const override;
 
 private:
-  // Format decoded event as table row
-  std::string format_event(const decoded_event_t& decoded_event) const;
+  event_data_t parse_payload(const uint8_t* buffer_ptr) const;
+
+  std::string format_event(const event_data_t& event_data) const;
 
   config_npu3 m_config;
 };

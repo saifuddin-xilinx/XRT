@@ -8,6 +8,7 @@
 #include "core/common/query_requests.h"
 #include "tools/common/XBUtilities.h"
 
+#include <boost/format.hpp>
 #include <memory>
 #include <stdexcept>
 #include <sstream>
@@ -20,7 +21,9 @@ event_trace_config(nlohmann::json json_config)
     m_file_major(parse_major_version()),
     m_file_minor(parse_minor_version()),
     m_code_tables(parse_code_table()),
-    m_category_map(parse_categories())
+    m_category_map(parse_categories()),
+    m_entry_header_size(parse_structure_size("ring_buffer_entry_header")),
+    m_entry_footer_size(parse_structure_size("ring_buffer_entry_footer"))
 {
 }
 
@@ -33,11 +36,7 @@ load_json_from_device(const xrt_core::device* device)
   }
 
   auto archive = XBUtilities::open_archive(device);
-  auto artifacts_repo = XBUtilities::extract_artifacts_from_archive(archive.get(), {"trace_events.json"});
-  auto& config_data = artifacts_repo["trace_events.json"];
-  std::string config_content(config_data.begin(), config_data.end());
-  
-  return nlohmann::json::parse(config_content);
+  return nlohmann::json::parse(archive->data("trace_events.json"));
 }
 
 uint16_t
@@ -111,7 +110,65 @@ create_category_info(const nlohmann::json& category)
   return cat_info;
 }
 
+size_t
+event_trace_config::
+parse_structure_size(const std::string& struct_name)
+{
+  if (!m_config.contains("structures") || !m_config["structures"].contains(struct_name)) {
+    return 0;
+  }
+  const auto& structure = m_config["structures"][struct_name];
+  if (structure.contains("size")) {
+    return structure["size"].get<size_t>();
+  }
+  return 0;
+}
+
 // Parser base implementation
+event_trace_parser::
+event_trace_parser()
+  : m_column_widths({30, 30, 30, 30})  // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
+{}
+
+std::string
+event_trace_parser::
+get_header_row() const
+{
+  const std::string fmt =
+    "%-" + std::to_string(m_column_widths[0]) + "s "
+    "%-" + std::to_string(m_column_widths[1]) + "s "
+    "%-" + std::to_string(m_column_widths[2]) + "s "
+    "%-" + std::to_string(m_column_widths[3]) + "s\n";
+  return (boost::format(fmt) % "Timestamp" % "Event Name" % "Category" % "Arguments").str();
+}
+
+std::string
+event_trace_parser::
+format_event_row(uint64_t timestamp,
+                 const std::string& event_name,
+                 const std::string& category_display,
+                 const std::string& args_str) const
+{
+  const std::string fmt =
+    "%-" + std::to_string(m_column_widths[0]) + "lu "
+    "%-" + std::to_string(m_column_widths[1]) + "s "
+    "%-" + std::to_string(m_column_widths[2]) + "s "
+    "%-" + std::to_string(m_column_widths[3]) + "s\n";
+  return (boost::format(fmt) % timestamp % event_name % category_display % args_str).str();
+}
+
+std::string
+event_trace_parser::
+format_sequence_gap(uint16_t prev_seq, uint16_t curr_seq) const
+{
+  if (curr_seq >= prev_seq + 2) {
+    const uint16_t delta = static_cast<uint16_t>(curr_seq - prev_seq);
+    return "  --- sequence gap: " + std::to_string(prev_seq) + " -> " + std::to_string(curr_seq)
+         + " (delta " + std::to_string(static_cast<unsigned>(delta)) + ", events may be missing) ---\n";
+  }
+  return "";
+}
+
 std::string
 event_trace_parser::
 format_categories(const std::vector<std::string>& categories) const
@@ -122,8 +179,10 @@ format_categories(const std::vector<std::string>& categories) const
   
   std::stringstream ss;
   for (size_t i = 0; i < categories.size(); ++i) {
-    if (i > 0) ss << "|";
-    ss << categories[i];
+    if (i > 0) ss << " and ";
+    auto category = categories[i];
+    boost::algorithm::erase_first(category, "EVENT_TRACE_CATEGORY_");
+    ss << category;
   }
   return ss.str();
 }
@@ -163,6 +222,52 @@ create_from_device(const xrt_core::device* device)
     return std::make_unique<config_strix>(json_config);
   else
     return std::make_unique<config_npu3>(json_config);
+}
+
+std::map<std::string, uint32_t>
+event_trace_config::
+get_category_map(const xrt_core::device* device) {
+  std::map<std::string, uint32_t> category_map;
+
+  // Load categories from config
+  try {
+    auto config = create_from_device(device);
+    
+    // Get categories from config and convert ID to mask
+    const auto& config_categories = config->get_categories();
+    for (const auto& [name, info] : config_categories) {
+      uint32_t mask = (1U << info.id);
+      category_map[name] = mask;
+    }
+  } catch (const std::exception&) {
+    // Config loading failed, return empty map
+  }
+  return category_map;
+}
+
+std::vector<std::string>
+event_trace_config::
+mask_to_category_names(uint32_t mask, const xrt_core::device* device) {
+  std::vector<std::string> category_names;
+  
+  if (mask == 0) {
+    return category_names; // Empty list for no categories
+  }
+  
+  if (mask == 0xFFFFFFFF) { // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)  
+    category_names.emplace_back("ALL");
+    return category_names;
+  }
+  
+  auto category_map = get_category_map(device);
+  
+  for (const auto& [name, category_mask] : category_map) {
+    if (mask & category_mask) {
+      category_names.push_back(name);
+    }
+  }
+  
+  return category_names;
 }
 
 std::unique_ptr<event_trace_parser>

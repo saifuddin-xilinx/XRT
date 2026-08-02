@@ -1,7 +1,7 @@
 name: XRT CI
 
 env:  
-  RELEASE: '2026.1'  
+  RELEASE: '2026.2'  
   PIPELINE: 'xrt' 
   ENV: 'prod' 
 
@@ -36,9 +36,7 @@ jobs:
     needs: authorize  
     strategy:      
       matrix:      
-        include:      
-          - os: centos79      
-            packageType: rpm      
+        include:         
           - os: centos8      
             packageType: rpm      
           - os: rhel9      
@@ -46,9 +44,7 @@ jobs:
           - os: rhel8.10      
             packageType: rpm
           - os: rhel10.0      
-            packageType: rpm
-          - os: ubuntu2004      
-            packageType: deb      
+            packageType: rpm   
           - os: hip      
             packageType: deb  
           - os: npu      
@@ -71,7 +67,8 @@ jobs:
           ref: "${{ github.event.pull_request.head.ref }}"
           fetch-depth: 0
           path: ${{ github.workspace }}/${{ github.run_number }}  
-          submodules: recursive   
+          submodules: recursive
+          allow-unsafe-pr-checkout: true
 
       - name: Checkout private repository      
         uses: actions/checkout@v3   
@@ -110,6 +107,7 @@ jobs:
           path: ${{ github.workspace }}/${{ github.run_number }}  
           submodules: recursive
           persist-credentials: false 
+          allow-unsafe-pr-checkout: true
             
       - name: Checkout private repository      
         uses: actions/checkout@v3   
@@ -151,6 +149,7 @@ jobs:
           fetch-depth: 0
           path: ${{ github.workspace }}/${{ github.run_number }}  
           submodules: recursive  
+          allow-unsafe-pr-checkout: true
 
       - name: Checkout private repository      
         uses: actions/checkout@v3   

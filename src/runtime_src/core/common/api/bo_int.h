@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
-#ifndef _XRT_COMMON_BO_INT_H_
-#define _XRT_COMMON_BO_INT_H_
+#ifndef XRT_COMMON_BO_INT_H_
+#define XRT_COMMON_BO_INT_H_
 
 // This file defines implementation extensions to the XRT BO APIs.
 #include "core/common/config.h"
@@ -14,7 +14,7 @@
 
 namespace xrt_core::bo_int {
 
-XRT_CORE_COMMON_EXPORT  
+XRT_CORE_COMMON_EXPORT
 xrt_core::buffer_handle*
 get_buffer_handle(const xrt::bo& bo);
 
@@ -60,6 +60,18 @@ XRT_CORE_COMMON_EXPORT
 xrt::bo
 create_bo(const xrt::hw_context& hwctx, size_t sz, use_type type);
 
+// create_bo() - Create a buffer object using shim hwctx handle and device
+// for specific use case
+//
+// Allocates a buffer object using shim hwctx handle and device.
+// Used when the buffer is owned by an hwctx (lifetime managed by hwctx)
+// This function directly passes the shim hwctx handle to avoid circular dependency.
+XRT_CORE_COMMON_EXPORT
+xrt::bo
+create_bo(xrt_core::hwctx_handle* hwctx_handle,
+          const std::shared_ptr<xrt_core::device>& device,
+          size_t sz, use_type type);
+
 // config_bo() - Configure the buffer object for the given use case (based on
 // the flag passed)
 //
@@ -84,6 +96,13 @@ config_bo(const xrt::bo& bo, const std::map<uint32_t, size_t>& buf_sizes,
 XRT_CORE_COMMON_EXPORT
 void
 unconfig_bo(const xrt::bo& bo, const xrt_core::hwctx_handle* ctx_handle = nullptr);
+
+// get_bo_from_impl() - Convert impl to xrt::bo
+//
+// The argument impl is created from a shared ptr, this function wraps
+// the impl in that shared_ptr.
+xrt::bo
+get_bo_from_impl(const xrt::bo_impl*);
 
 } // bo_int, xrt_core
 

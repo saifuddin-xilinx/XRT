@@ -11,7 +11,7 @@
 #include "core/common/runner/runner.h"
 #include "core/common/json/nlohmann/json.hpp"
 #include "core/common/archive.h"
-#include "core/common/smi.h"
+#include "core/common/smi/smi.h"
 
 namespace XBU = XBValidateUtils;
 namespace xq = xrt_core::query;
@@ -89,6 +89,10 @@ run_strix(const std::shared_ptr<xrt_core::device>& dev, const xrt_core::archive*
   catch(const std::exception& e) {
     XBValidateUtils::logger(ptree, "Error", e.what());
     ptree.put("status", XBValidateUtils::test_token_failed);
+
+    // Restore the original preemption state
+    xrt_core::device_update<xq::preemption>(dev.get(), static_cast<uint32_t>(layer_boundary));
+    return;
   }
 
   // Restore the original preemption state
@@ -103,26 +107,23 @@ run_npu3(const std::shared_ptr<xrt_core::device>& dev, const xrt_core::archive* 
   const auto layer_boundary = xrt_core::device_query_default<xq::preemption>(dev.get(), 0);
 
   try {
-    std::string recipe_4x1_memtile_data = archive->data("recipe_preemption_memtile_4x1.json");
     std::string recipe_4x3_memtile_data = archive->data("recipe_preemption_memtile_4x3.json");
-    std::string profile_data = archive->data("profile_preemption.json"); 
+    std::string profile_data = archive->data("profile_preemption.json");
 
-    
     auto artifacts_repo = XBUtilities::extract_artifacts_from_archive(archive, {
-      "preemption_memtile_4x1.elf",
       "preemption_memtile_4x3.elf",
     });
 
-    // Measure preemption overhead for all 4 recipes
-    auto overhead_memtile_4x1 = measure_preemption_overhead(dev, recipe_4x1_memtile_data, profile_data, artifacts_repo);
-    XBU::logger(ptree, "Details", boost::str(boost::format("Average %s preemption overhead for 4x%d is %.1f us") % "memtile" % 1 % overhead_memtile_4x1));
-
     auto overhead_memtile_4x3 = measure_preemption_overhead(dev, recipe_4x3_memtile_data, profile_data, artifacts_repo);
-    XBU::logger(ptree, "Details", boost::str(boost::format("Average %s preemption overhead for 4x%d is %.1f us") % "memtile" % 3 % overhead_memtile_4x3));
+    XBU::logger(ptree, "Details", boost::str(boost::format("Average %s preemption overhead is %.1f us") % "memtile" % overhead_memtile_4x3));
   }
   catch(const std::exception& e) {
     XBValidateUtils::logger(ptree, "Error", e.what());
     ptree.put("status", XBValidateUtils::test_token_failed);
+
+    // Restore the original preemption state
+    xrt_core::device_update<xq::preemption>(dev.get(), static_cast<uint32_t>(layer_boundary));
+    return;
   }
 
   // Restore the original preemption state
@@ -134,13 +135,6 @@ run_npu3(const std::shared_ptr<xrt_core::device>& dev, const xrt_core::archive* 
 TestPreemptionOverhead::TestPreemptionOverhead()
   : TestRunner("preemption-overhead", "Measure preemption overhead at noop and memtile levels")
 {}
-
-boost::property_tree::ptree
-TestPreemptionOverhead::run(const std::shared_ptr<xrt_core::device>&)
-{
-  boost::property_tree::ptree ptree = get_test_header();
-  return ptree;
-}
 
 boost::property_tree::ptree
 TestPreemptionOverhead::run(const std::shared_ptr<xrt_core::device>& dev, const xrt_core::archive* archive)

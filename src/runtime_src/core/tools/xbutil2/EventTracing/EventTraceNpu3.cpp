@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
 
+#include "core/common/json/nlohmann/json.hpp"
 #include "EventTraceNpu3.h"
 #include "tools/common/XBUtilities.h"
 
@@ -82,10 +83,6 @@ parse_events()
 {
   std::map<uint16_t, event_info_npu3> event_map;
   auto config = get_config();
-  if (!config.contains("events")) {
-    return event_map;
-  }
-  
   for (const auto& it : config["events"].items()) {
     const nlohmann::json& event_data = it.value();
     event_info_npu3 event = create_event_info(event_data);
@@ -107,7 +104,6 @@ create_event_info(const nlohmann::json& event_data)
 
   parse_event_categories(event_data, event);
   parse_event_arguments(event_data, event);
-  
   return event;
 }
 
@@ -149,44 +145,15 @@ parse_event_arguments(const nlohmann::json& event_data,
   }
 }
 
-config_npu3::event_data_t
-config_npu3::
-parse_buffer(const uint8_t* buffer_ptr) const
-{
-  const uint8_t* current_ptr = buffer_ptr;
-  // Parse magic byte (should be 0xAA)
-  uint8_t magic = *current_ptr++;
-  if (magic != npu3_magic_byte) {
-    throw std::runtime_error("Invalid event message, corruption detected");
-  }
-  
-  // Parse category_id (2 bytes)
-  uint16_t category_id = 0;
-  std::memcpy(&category_id, current_ptr, sizeof(uint16_t));
-  current_ptr += sizeof(uint16_t);
-  
-  // Parse payload_size (1 byte)
-  uint8_t payload_size = *current_ptr++;
-  
-  // Parse timestamp (8 bytes)
-  uint64_t timestamp = *reinterpret_cast<const uint64_t*>(current_ptr);
-  current_ptr += sizeof(uint64_t);
-
-  // Payload pointer
-  const uint8_t* payload_ptr = current_ptr;
-  
-  return {timestamp, category_id, payload_ptr, payload_size};
-}
-
 config_npu3::decoded_event_t
 config_npu3::
 decode_event(const event_data_t& event_data) const
 {
   decoded_event_t decoded;
   decoded.timestamp = event_data.timestamp;
-  decoded.event_id = event_data.category_id;
+  decoded.event_id = static_cast<uint16_t>(event_data.event_id);
   
-  auto event_it = m_event_map.find(event_data.category_id);
+  auto event_it = m_event_map.find(static_cast<uint16_t>(event_data.event_id));
   if (event_it != m_event_map.end()) {
     const event_info_npu3& event = event_it->second;
     decoded.name = event.name;
@@ -205,7 +172,7 @@ decode_event(const event_data_t& event_data) const
     }
   } else {
     decoded.name = "UNKNOWN";
-    decoded.description = "Unknown event ID: " + std::to_string(event_data.category_id);
+    decoded.description = "Unknown event ID: " + std::to_string(event_data.event_id);
     decoded.categories = {"UNKNOWN"};
   }
   
@@ -287,10 +254,13 @@ extract_arg_value(const uint8_t* payload_ptr,
       }
       return format_value(value, arg.format) + " [lookup:" + arg.lookup + "]";
     }
-    
-    return format_value(value, arg.format);
+    // Default uint64 to hex when format not specified
+    std::string fmt = arg.format;
+    if (fmt.empty() && arg.type == "uint64")
+      fmt = "016x";
+    return format_value(value, fmt);
   }
-  
+
   return ss.str();
 }
 
@@ -340,74 +310,70 @@ format_value(uint64_t value, const std::string& format) const
 parser_npu3::
 parser_npu3(config_npu3 config)
   : m_config(std::move(config))
+{}
+
+parser_npu3::event_data_t
+parser_npu3::
+parse_payload(const uint8_t* buffer_ptr) const
 {
+  const uint8_t* current_ptr = buffer_ptr + 1;  // magic (1 byte)
+
+  const uint8_t payload_words = *current_ptr;
+  current_ptr++; // payload_words (1 byte)
+
+  uint16_t sequence_number = 0;
+  std::memcpy(&sequence_number, current_ptr, sizeof(sequence_number));
+  current_ptr += 2;
+
+  current_ptr += 4;  // reserved
+
+  event_data_t out;
+  std::memcpy(&out.timestamp, current_ptr, sizeof(out.timestamp));
+  current_ptr += sizeof(out.timestamp);
+  std::memcpy(&out.event_id, current_ptr, sizeof(out.event_id));
+  current_ptr += sizeof(out.event_id);
+  out.payload_ptr = current_ptr;
+  out.payload_words = payload_words;
+  out.sequence_number = sequence_number;
+  return out;
 }
 
 std::string
 parser_npu3::
 parse(const uint8_t* data_ptr, size_t buf_size) const
 {
-  std::stringstream ss;
-  
-  if (!data_ptr || buf_size == 0) {
-    return "No event trace data available\n";
-  }
+  std::stringstream ss{};
 
-  const uint8_t* current_ptr = data_ptr;
-  const uint8_t* end_ptr = data_ptr + buf_size;
-  
-  // Parse each variable-size event
-  while (current_ptr < end_ptr) {
-    // Check if we have enough bytes for minimum event header
-    if (current_ptr + npu3_header_bytes > end_ptr) {
-      break;  // Not enough data for another event
+  std::optional<uint16_t> prev_seq;
+  for (size_t offset = 0; offset < buf_size; ) {
+    if (data_ptr[offset] != npu3_rbe_header_magic) {
+      offset++;
+      continue;
     }
-    
-    try {
-      // Parse NPU3 event
-      auto event_data = m_config.parse_buffer(current_ptr);
-      
-      // Decode event
-      auto decoded_event = m_config.decode_event(event_data);
-      
-      // Format output
-      ss << format_event(decoded_event);
-      
-      // Advance pointer: header(12) + payload_size
-      current_ptr += npu3_header_bytes + event_data.payload_size;
-      
-    } catch (const std::exception& e) {
-      ss << "Error parsing event: " << e.what() << "\n";
-      break;
-    }
+    auto event_data = parse_payload(data_ptr + offset);
+    const size_t entry_size = npu3_rbe_header_bytes 
+                              + (static_cast<size_t>(event_data.payload_words) * 8) //NOLINT
+                              + npu3_rbe_footer_bytes; 
+    if (prev_seq)
+      ss << format_sequence_gap(*prev_seq, event_data.sequence_number);
+    prev_seq = event_data.sequence_number;
+    ss << format_event(event_data);
+    offset += entry_size;
   }
-  
   return ss.str();
 }
 
 std::string
 parser_npu3::
-format_event(const decoded_event_t& decoded_event) const
+format_event(const event_data_t& event_data) const
 {
-  std::stringstream ss;
-  
-  // Format categories
+  auto decoded_event = m_config.decode_event(event_data);
   std::string categories_str = format_categories(decoded_event.categories);
-  
-  // Format arguments
   std::string args_str = format_arguments(decoded_event.args);
-  
-  // Format as table row with consistent column widths
   std::string event_name = decoded_event.name.empty() ? "UNKNOWN" : decoded_event.name;
   std::string category_display = categories_str.empty() ? "UNKNOWN" : categories_str;
-  
-  ss << boost::format("%-20lu %-30s %-55s %-30s\n")
-        % decoded_event.timestamp
-        % event_name
-        % category_display
-        % args_str;
-  
-  return ss.str();
+
+  return format_event_row(event_data.timestamp, event_name, category_display, args_str);
 }
 
 } // namespace xrt_core::tools::xrt_smi

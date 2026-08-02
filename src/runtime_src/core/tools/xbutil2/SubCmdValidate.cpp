@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2019-2022 Xilinx, Inc
-// Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 
 // ------ I N C L U D E   F I L E S -------------------------------------------
 // Local - Include Files
@@ -36,12 +36,14 @@
 #include "tools/common/tests/TestGemm.h"
 #include "tools/common/tests/TestNPUThroughput.h"
 #include "tools/common/tests/TestNPULatency.h"
-#include "tools/common/tests/TestCmdChainLatency.h"
-#include "tools/common/tests/TestCmdChainThroughput.h"
+#include "tools/common/tests/TestRunlistLatency.h"
+#include "tools/common/tests/TestRunlistThroughput.h"
 #include "tools/common/tests/TestAIEReconfigOverhead.h"
 #include "tools/common/tests/TestTemporalSharingOvd.h"
 #include "tools/common/tests/TestPreemptionOverhead.h"
 #include "tools/common/tests/TestValidateUtilities.h"
+#include "tools/common/tests/TestShimDMABW.h"
+#include "tools/common/tests/TestSanity.h"
 
 namespace XBU = XBUtilities;
 namespace xq = xrt_core::query;
@@ -113,11 +115,13 @@ std::vector<std::shared_ptr<TestRunner>> testSuite = {
   std::make_shared<TestGemm>(),
   std::make_shared<TestNPUThroughput>(),
   std::make_shared<TestNPULatency>(),
-  std::make_shared<TestCmdChainLatency>(),
-  std::make_shared<TestCmdChainThroughput>(),
+  std::make_shared<TestRunlistLatency>(),
+  std::make_shared<TestRunlistThroughput>(),
   std::make_shared<TestAIEReconfigOverhead>(),
   std::make_shared<TestTemporalSharingOvd>(),
   std::make_shared<TestPreemptionOverhead>(),
+  std::make_shared<TestShimDMABW>(),
+  std::make_shared<TestSanity>(),
 };
 
 /*
@@ -214,8 +218,6 @@ print_status(test_status status, std::ostream & _ostream)
     _ostream << "Validation completed";
   if (status == test_status::warning)
     _ostream << ", but with warnings";
-  if (!XBU::getVerbose())
-    _ostream << ". Please run the command '--verbose' option for more details";
   _ostream << std::endl;
 }
 
@@ -290,7 +292,8 @@ static test_status
 run_test_suite_device( const std::shared_ptr<xrt_core::device>& device,
                        Report::SchemaVersion schemaVersion,
                        std::vector<std::shared_ptr<TestRunner>>& testObjectsToRun,
-                       boost::property_tree::ptree& ptDevCollectionTestSuite)
+                       boost::property_tree::ptree& ptDevCollectionTestSuite,
+                       unsigned int iter_count)
 {
   boost::property_tree::ptree ptDeviceTestSuite;
   boost::property_tree::ptree ptDeviceInfo;
@@ -312,8 +315,8 @@ run_test_suite_device( const std::shared_ptr<xrt_core::device>& device,
     boost::property_tree::ptree ptTest;
     pretty_print_test_desc(testPtr, ptTest, test_idx, std::cout, xq::pcie_bdf::to_string(bdf));
     try {
-      // Call startTest with archive if available, otherwise use standard call
-      ptTest = test_archive ? testPtr->startTest(device, test_archive.get()) : testPtr->startTest(device);
+      // Call startTest with archive if available, otherwise use standard call; pass iter_count for repeated runs
+      ptTest = test_archive ? testPtr->startTest(device, test_archive.get(), iter_count) : testPtr->startTest(device, nullptr, iter_count);
     } catch (const std::runtime_error& e) {
       std::cout << e.what() << std::endl;
       return test_status::failed;
@@ -339,14 +342,15 @@ static bool
 run_tests_on_devices( std::shared_ptr<xrt_core::device> &device,
                       Report::SchemaVersion schemaVersion,
                       std::vector<std::shared_ptr<TestRunner>>& testObjectsToRun,
-                      std::ostream & output)
+                      std::ostream & output,
+                      unsigned int iter_count)
 {
   // -- Root property tree
   boost::property_tree::ptree ptDevCollectionTestSuite;
 
   // -- Run the various tests and collect the test data
   boost::property_tree::ptree ptDeviceTested;
-  auto has_failures = (run_test_suite_device(device, schemaVersion, testObjectsToRun, ptDeviceTested) == test_status::failed);
+  auto has_failures = (run_test_suite_device(device, schemaVersion, testObjectsToRun, ptDeviceTested, iter_count) == test_status::failed);
 
   ptDevCollectionTestSuite.put_child("logical_devices", ptDeviceTested);
 
@@ -423,12 +427,7 @@ SubCmdValidate::handle_errors_and_validate_tests(const boost::program_options::v
 
   auto testsToRun = options.m_tests_to_run;
   if (testsToRun.empty()) {
-    if (!XBU::getAdvance()) {
-      testsToRun = std::vector<std::string>({"all"});
-    }
-    else {
-      throw xrt_core::error("No test given to validate against.");
-    }
+    testsToRun = std::vector<std::string>({"all"});
   }
   // Validate the user test requests
   for (auto &userTestName : testsToRun) {
@@ -525,7 +524,7 @@ SubCmdValidate::execute(const SubCmdOptions& _options) const
     if (schemaVersion == Report::SchemaVersion::unknown)
       throw xrt_core::error((boost::format("Unknown output format: '%s'") % options.m_format).str());
     // All Error Handling for xrt-smi validate should go here
-    handle_errors_and_validate_tests(vm, options, testOptions, validatedTests, param); 
+    handle_errors_and_validate_tests(vm, options, testOptions, validatedTests, param);
 
     // check if xclbin folder path is provided
     if (!validateXclbinPath.empty()) {
@@ -605,8 +604,11 @@ SubCmdValidate::execute(const SubCmdOptions& _options) const
       else if (boost::iequals(options.m_pmode, "TURBO")) {
         xrt_core::device_update<xq::performance_mode>(device.get(), xq::performance_mode::power_type::turbo);
       }
-      else if (boost::iequals(options.m_pmode, "POWERSAVER") || boost::iequals(options.m_pmode, "BALANCED")) {
-        throw xrt_core::error(boost::str(boost::format("No tests are supported in %s mode\n") % options.m_pmode));
+      else if (boost::iequals(options.m_pmode, "POWERSAVER")) {
+        xrt_core::device_update<xq::performance_mode>(device.get(), xq::performance_mode::power_type::powersaver);
+      }
+      else if (boost::iequals(options.m_pmode, "BALANCED")) {
+        xrt_core::device_update<xq::performance_mode>(device.get(), xq::performance_mode::power_type::balanced);
       }
       else {
         throw xrt_core::error(boost::str(boost::format("Invalid pmode value: '%s'\n") % options.m_pmode));
@@ -630,7 +632,7 @@ SubCmdValidate::execute(const SubCmdOptions& _options) const
   }
   // -- Run the tests --------------------------------------------------
   std::ostringstream oSchemaOutput;
-  bool has_failures = run_tests_on_devices(device, schemaVersion, testObjectsToRun, oSchemaOutput);
+  bool has_failures = run_tests_on_devices(device, schemaVersion, testObjectsToRun, oSchemaOutput, options.m_loop);
 
   try {
     //reset pmode
@@ -669,6 +671,7 @@ void SubCmdValidate::fill_option_values(const po::variables_map& vm, SubCmdValid
   options.m_xclbin_path = vm.count("path") ? vm["path"].as<std::string>() : "";
   options.m_pmode = vm.count("pmode") ? vm["pmode"].as<std::string>() : "";
   options.m_tests_to_run = vm.count("run") ? vm["run"].as<std::vector<std::string>>() : std::vector<std::string>();
+  options.m_loop = vm.count("loop") ? static_cast<unsigned int>(std::stoul(vm["loop"].as<std::string>())) : 1;
   options.m_help = vm.count("help") ? vm["help"].as<bool>() : false;
   options.m_elf = vm.count("elf") ? vm["elf"].as<bool>() : false;
 }

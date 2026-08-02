@@ -8,28 +8,20 @@ endif()
 add_subdirectory(api)
 add_subdirectory(xdp)
 add_subdirectory(runner)
+add_subdirectory(smi)
 
 if(CMAKE_VERSION VERSION_LESS "3.18.0")
   message(WARNING "CMake version is less than 3.18.0, build of submodule aiebu disabled")
-elseif (${CMAKE_CXX_COMPILER} MATCHES "(arm64|ARM64)")
-  message(WARNING "Compiling for ARM64, build of submodule aiebu disabled")
-elseif (NOT XRT_EDGE)
+else()
   set(AIEBU_COMPONENT ${XRT_BASE_COMPONENT})
   set(AIEBU_DEV_COMPONENT ${XRT_BASE_DEV_COMPONENT})
   set(AIEBU_UPSTREAM ${XRT_UPSTREAM})
+  set(AIEBU_INSTALL_STATIC_LIBRARY ${XRT_INSTALL_STATIC_LIBRARY})
 
   # AIEBU should use XRT's version of ELFIO
   set(AIEBU_ELFIO_SRC_DIR ${XRT_SOURCE_DIR}/runtime_src/core/common/elf)
 
-  # AIEBU should build XRT's version of aie-rt, unless XRT is sharing its
-  # build of aie-rt
-  if (NOT DEFINED AIEBU_AIE-RT_BIN_DIR)
-    set(AIEBU_AIE-RT_SRC_DIR ${XRT_SOURCE_DIR}/runtime_src/aie-rt)
-  endif()
-
   xrt_add_subdirectory(aiebu)
-else()
-  message(WARNING "Edge device, build of submodule aiebu disabled")
 endif()
 
 add_library(core_common_library_objects OBJECT
@@ -60,7 +52,6 @@ add_library(core_common_library_objects OBJECT
   sysinfo.cpp
   xclbin_parser.cpp
   xclbin_swemu.cpp
-  smi.cpp
   )
 
 target_include_directories(core_common_library_objects
@@ -93,6 +84,7 @@ add_library(xrt_coreutil SHARED
   $<TARGET_OBJECTS:core_common_runner_objects>
   $<TARGET_OBJECTS:core_common_api_library_objects>
   $<TARGET_OBJECTS:core_common_xdp_profile_objects>
+  $<TARGET_OBJECTS:core_common_smi_objects>
   )
 
 add_library(xrt_coreutil_static STATIC
@@ -100,6 +92,7 @@ add_library(xrt_coreutil_static STATIC
   $<TARGET_OBJECTS:core_common_runner_objects>
   $<TARGET_OBJECTS:core_common_api_library_objects>
   $<TARGET_OBJECTS:core_common_xdp_profile_objects>
+  $<TARGET_OBJECTS:core_common_smi_objects>
   )
 
 set_target_properties(xrt_coreutil PROPERTIES
@@ -117,12 +110,18 @@ endif()
 # links with xrt_coreutil
 # BUILD_INTERFACE is for targets within XRT that link with xrt_coreutil
 # INSTALL_INTERFACE is for external targets that link XRT::xrt_coreutil
+# Link aiebu dtrace library when aiebu is built
+if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.18.0")
+  target_link_libraries(xrt_coreutil PRIVATE cert_dtrace_static aiebu_static)
+  target_link_libraries(xrt_coreutil_static PRIVATE cert_dtrace_static aiebu_static)
+endif()
+
 target_include_directories(xrt_coreutil
   PUBLIC
   $<BUILD_INTERFACE:${XRT_SOURCE_DIR}/runtime_src>
   $<INSTALL_INTERFACE:${XRT_INSTALL_INCLUDE_DIR}>
   )
-  
+
 target_include_directories(xrt_coreutil_static
   PUBLIC
   $<BUILD_INTERFACE:${XRT_SOURCE_DIR}/runtime_src>
@@ -161,12 +160,8 @@ install(TARGETS xrt_coreutil
   LIBRARY DESTINATION ${XRT_INSTALL_LIB_DIR} COMPONENT ${XRT_BASE_COMPONENT} NAMELINK_COMPONENT ${XRT_BASE_DEV_COMPONENT}
   ARCHIVE DESTINATION ${XRT_INSTALL_LIB_DIR} COMPONENT ${XRT_BASE_DEV_COMPONENT})
 
-# Install static library - exclude from xrt-targets export in yocto builds
-# to avoid find_package(XRT) failures when static libs are not in sysroot
-if(XRT_YOCTO)
-  install(TARGETS xrt_coreutil_static
-    ARCHIVE DESTINATION ${XRT_INSTALL_LIB_DIR} COMPONENT ${XRT_BASE_DEV_COMPONENT})
-else()
+# Enable install of static library iff requested
+if(XRT_INSTALL_STATIC_LIBRARY)
   install(TARGETS xrt_coreutil_static
     EXPORT xrt-targets
     ARCHIVE DESTINATION ${XRT_INSTALL_LIB_DIR} COMPONENT ${XRT_BASE_DEV_COMPONENT})

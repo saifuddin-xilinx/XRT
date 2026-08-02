@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2016-2017 Xilinx, Inc. All rights reserved.
-// Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 #define XRT_CORE_COMMON_SOURCE
 #include "time.h"
 #include "detail/systime.h" // after time.h, order matters
@@ -11,17 +11,18 @@
 #include <iomanip>
 #include <sstream>
 
-#ifdef _WIN32
-# pragma warning ( disable : 4996 )
-#endif
 namespace {
-  
-static std::tm*
+
+static std::tm
 get_gmtime(const std::time_t& time)
 {
-  std::tm* tm;
-  tm = gmtime(&time); 
-  return tm;
+  std::tm tm_buf{};
+#ifdef _WIN32
+  gmtime_s(&tm_buf, &time);
+#else
+  gmtime_r(&time, &tm_buf);
+#endif
+  return tm_buf;
 }
 
 }
@@ -50,7 +51,7 @@ timestamp()
   auto time = std::chrono::system_clock::now();
   auto tm = get_gmtime(std::chrono::system_clock::to_time_t(time));
   char buf[64] = {0};
-  return std::strftime(buf, sizeof(buf), "%c GMT", tm)
+  return std::strftime(buf, sizeof(buf), "%c GMT", &tm)
     ? buf : "Time conversion failed";
 }
 
@@ -60,9 +61,12 @@ timestamp()
 std::string
 timestamp(uint64_t epoch)
 {
-  time_t rawtime = epoch;
-  std::string tmp(ctime(&rawtime));
-  return tmp.substr( 0, tmp.length() -1).append(" GMT");
+  std::time_t rawtime = static_cast<std::time_t>(epoch);
+
+  std::tm tm = get_gmtime(rawtime);
+  std::ostringstream os;
+  os << std::put_time(&tm, "%a %b %d %H:%M:%S %Y GMT");
+  return os.str();
 }
 
 // returns formatted timestamp string that can be concatenated with
@@ -70,8 +74,15 @@ timestamp(uint64_t epoch)
 std::string
 get_timestamp_for_filename()
 {
+  constexpr int microseconds_per_second = 1000000;
+  constexpr int microsecond_width = 6;
+
   auto current_time = std::chrono::system_clock::now();
   std::time_t time = std::chrono::system_clock::to_time_t(current_time);
+
+  // Extract microseconds
+  auto us = std::chrono::duration_cast<std::chrono::microseconds>(
+      current_time.time_since_epoch()) % microseconds_per_second;
 
   std::tm tm_buf{};
   #ifdef _WIN32
@@ -81,7 +92,24 @@ get_timestamp_for_filename()
   #endif
 
   std::stringstream time_stamp;
-  time_stamp << std::put_time(&tm_buf, "%Y-%m-%d_%H-%M-%S");
+  time_stamp << std::put_time(&tm_buf, "%Y-%m-%d_%H-%M-%S")
+             << '-' << std::setfill('0') << std::setw(microsecond_width) << us.count();
+  return time_stamp.str();
+}
+
+// returns uc log formatted timestamp "seconds.nanoseconds"
+std::string
+get_timestamp_for_uc_log(uint64_t epoch_ns)
+{
+  constexpr uint64_t nanoseconds_per_second = 1000000000;
+  constexpr int nanoseconds_width = 9;
+
+  uint64_t seconds = epoch_ns / nanoseconds_per_second;
+  uint64_t nanoseconds = epoch_ns % nanoseconds_per_second;
+
+  std::stringstream time_stamp;
+  time_stamp << seconds << '.'
+             << std::setfill('0') << std::setw(nanoseconds_width) << nanoseconds;
   return time_stamp.str();
 }
 

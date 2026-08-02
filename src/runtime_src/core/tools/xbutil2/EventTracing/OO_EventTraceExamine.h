@@ -6,6 +6,7 @@
 #include "core/common/device.h"
 #include "tools/common/OptionOptions.h"
 #include "EventTraceBase.h"
+#include <optional>
 
 namespace smi = xrt_core::tools::xrt_smi;
 
@@ -20,13 +21,17 @@ private:
   std::string m_device;
   bool m_help;
   bool m_watch;
-  bool m_raw;
+  std::optional<std::string> m_raw;
   bool m_version;
+  bool m_status;
   mutable uint64_t m_watch_mode_offset;
 
   // Handler methods for different modes
   void
   handle_version(const xrt_core::device* device) const;
+
+  void
+  handle_status(const xrt_core::device* device) const;
 
   void
   handle_logging(const xrt_core::device* device) const;
@@ -39,10 +44,6 @@ private:
   std::string 
   generate_raw_logs(const xrt_core::device* dev, 
                     bool is_watch) const;
-
-  // Format table header for trace events
-  std::string 
-  add_header() const;
 
   // Display raw version as 4 bytes with LSB first
   // This is required by firmware to consume event-logs

@@ -3,29 +3,33 @@
 #define XRT_CORE_COMMON_SOURCE
 #include "sysinfo.h"
 #include "detail/sysinfo.h"
-#include "system.h"
 
-#include "xrt/detail/version.h"
+#include "system.h"
+#include "utils.h"
+
+#include "xrt/detail/version-git.h"
+
+#include <cstdlib>
 
 namespace xrt_core::sysinfo {
 
 void
 get_xrt_info(boost::property_tree::ptree& pt)
 {
-  pt.put("version",    xrt_build_version);
-  pt.put("branch",     xrt_build_version_branch);
-  pt.put("hash",       xrt_build_version_hash);
-  pt.put("build_date", xrt_build_version_date);
+  pt.put("version",         xrt_build_version);
+  pt.put("branch",          xrt_build_version_branch);
+  pt.put("hash",            xrt_build_version_hash);
+  pt.put("build_hash_date", xrt_build_version_hash_date);
   xrt_core::get_driver_info(pt);
 }
 
 void
 get_xrt_build_info(boost::property_tree::ptree& pt)
 {
-  pt.put("version",    xrt_build_version);
-  pt.put("branch",     xrt_build_version_branch);
-  pt.put("hash",       xrt_build_version_hash);
-  pt.put("build_date", xrt_build_version_date);
+  pt.put("version",         xrt_build_version);
+  pt.put("branch",          xrt_build_version_branch);
+  pt.put("hash",            xrt_build_version_hash);
+  pt.put("build_hash_date", xrt_build_version_hash_date);
 }
 
 void
@@ -45,6 +49,9 @@ get_os_info()
 bool
 is_advanced()
 {
+  if (xrt_core::utils::is_env("XRTSMIAdvanced"))
+    return true;
+
   return xrt_core::sysinfo::detail::is_advanced();
 }
 

@@ -58,8 +58,12 @@ if (pybind11_FOUND)
   endif()
 
   install(TARGETS pyxrt
-    EXPORT xrt-targets
     LIBRARY DESTINATION ${XRT_INSTALL_PYTHON_DIR} COMPONENT ${XRT_BASE_COMPONENT}
+    )
+
+  # Install type stub file for IDE autocompletion and type checking
+  install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/pyxrt.pyi
+    DESTINATION ${XRT_INSTALL_PYTHON_DIR} COMPONENT ${XRT_BASE_COMPONENT}
     )
 
 else(pybind11_FOUND)
@@ -103,8 +107,12 @@ if (pybind11_FOUND)
   set_target_properties(pyxrt PROPERTIES SUFFIX ".pyd")
 
   install(TARGETS pyxrt
-    EXPORT xrt-targets
     LIBRARY DESTINATION ${XRT_INSTALL_PYTHON_DIR} COMPONENT ${XRT_BASE_COMPONENT}
+    )
+
+  # Install type stub file for IDE autocompletion and type checking
+  install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/pyxrt.pyi
+    DESTINATION ${XRT_INSTALL_PYTHON_DIR} COMPONENT ${XRT_BASE_COMPONENT}
     )
 
 else(pybind11_FOUND)

@@ -32,7 +32,7 @@ namespace po = boost::program_options;
 
 // ----- C L A S S   M E T H O D S -------------------------------------------
 
-SubCmdAdvanced::SubCmdAdvanced(bool _isHidden, bool _isDepricated, bool _isPreliminary, const boost::property_tree::ptree& configurations)
+SubCmdAdvanced::SubCmdAdvanced(bool _isHidden, bool _isDepricated, bool _isPreliminary)
     : SubCmd("advanced", 
              "Low level command operations"),
       m_device("")
@@ -49,12 +49,10 @@ SubCmdAdvanced::SubCmdAdvanced(bool _isHidden, bool _isDepricated, bool _isPreli
     ("help", boost::program_options::bool_switch(&m_help), "Help to use this sub-command")
   ;
 
-  m_commandConfig = configurations;
-
   addSubOption(std::make_shared<OO_MemRead>("read-mem"));
   addSubOption(std::make_shared<OO_MemWrite>("write-mem"));
 // Only defined for embedded platform
-#ifndef ENABLE_NATIVE_SUBCMDS_AND_REPORTS
+#if !defined(ENABLE_NATIVE_SUBCMDS_AND_REPORTS) || defined(XDNA_VE2)
   addSubOption(std::make_shared<OO_AieRegRead>("read-aie-reg"));
   addSubOption(std::make_shared<OO_AieClockFreq>("aie-clock"));
 #endif

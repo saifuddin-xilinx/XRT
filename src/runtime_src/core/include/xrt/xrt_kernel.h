@@ -533,7 +533,7 @@ public:
   XRT_API_EXPORT
   void
   submit_wait(const xrt::fence& fence);
-  
+
   XRT_API_EXPORT
   void
   submit_signal(const xrt::fence& fence);
@@ -645,19 +645,35 @@ public:
 
   /**
    * get_ctrl_scratchpad_bo() - Get the ctrl scratchpad bo object
-   * 
+   *
    * NPU uses ctrl scratchpad memory to store control state data.
    * This memory is created by XRT based on ELF used to create xrt::kernel
    * The API returns the buffer object (bo) created by XRT allowing
    * applications to read from or write to it.
    * This API is only valid for run objects associated with an ELF.
-   * 
+   *
    * Throws if control scratchpad section is not absent in ELF or
    * if any error occurs while retrieving the bo
    */
   XRT_API_EXPORT
   xrt::bo
   get_ctrl_scratchpad_bo() const;
+
+  /**
+   * set_dtrace_control_file() - Set dtrace control (ct) file for this run.
+   *
+   * @param path: Path to the dtrace control file. Used for dtrace handle
+   *   creation when start() is called; preferred over config when set.
+   *
+   * Must be called before start() or after run completes. Throws if the run
+   * has already been started and is still in progress. After a run completes,
+   * call this to set a different ct file and start() again to relaunch.
+   *
+   * Throws if the run does not support dtrace flow (non-ELF flow).
+   */
+  XRT_API_EXPORT
+  void
+  set_dtrace_control_file(const std::string& path);
 
 public:
   /// @cond
@@ -779,6 +795,7 @@ public:
    * other kernels and other process will have shared access to same
    * compute units.
    */
+  [[deprecated("deprecated, please use kernel(hw_context, name) instead")]]
   XRT_API_EXPORT
   kernel(const xrt::device& device, const xrt::uuid& xclbin_id, const std::string& name,
          cu_access_mode mode = cu_access_mode::shared);
@@ -791,14 +808,13 @@ public:
   /// @endcond
 
   /// @cond
-  /// Deprecated construtor for exclusive access
-  kernel(const xrt::device& device, const xrt::uuid& xclbin_id, const std::string& name, bool ex)
-    : kernel(device, xclbin_id, name, ex ? cu_access_mode::exclusive : cu_access_mode::shared)
-  {}
+  /// Deprecated constructor for exclusive access
+  kernel(const xrt::device& device, const xrt::uuid& xclbin_id, const std::string& name, bool ex);
 
   /**
    * Obsoleted construction from xclDeviceHandle
    */
+  [[deprecated("deprecated, please use kernel(hw_context, name) instead")]]
   XRT_API_EXPORT
   kernel(xclDeviceHandle dhdl, const xrt::uuid& xclbin_id, const std::string& name,
          cu_access_mode mode = cu_access_mode::shared);
@@ -908,6 +924,20 @@ public:
   XRT_API_EXPORT
   xrt::xclbin
   get_xclbin() const;
+
+  /**
+   * operator < () - Weak ordering
+   *
+   * @param rhs
+   *  Object to compare with
+   * @return
+   *  True if object is ordered less that compared with other
+   */
+  bool
+  operator < (const xrt::kernel& rhs) const
+  {
+    return handle < rhs.handle;
+  }
 
 public:
   /// @cond

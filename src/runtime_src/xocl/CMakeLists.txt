@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2019-2021 Xilinx, Inc. All rights reserved.
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 include_directories(
   ${Boost_INCLUDE_DIRS}
   ${XRT_SOURCE_DIR}/include/1_2
@@ -43,9 +43,9 @@ add_compile_options("-DXRT_XOCL_SOURCE")
 add_library(xocl OBJECT ${XRT_XOCL_ALL_SRC})
 
 if (WIN32)
-include_directories(
-  ${KHRONOS}/include
-  )
+  # Put Khronos OpenCL headers *ahead* of XRT's include/1_2 wrappers.
+  # We still need include/1_2 later for cl_ext_xilinx.h.
+  include_directories(BEFORE ${KHRONOS}/include)
 
 xrt_configure_version_file(xilinxopencl SHARED)
 add_library(xilinxopencl SHARED
@@ -62,6 +62,10 @@ target_link_libraries(xilinxopencl
   PRIVATE
   xrt++
   xrt_coreutil
+  )
+
+target_compile_options(xocl PRIVATE
+  $<$<CXX_COMPILER_ID:MSVC>:/wd4100>
   )
 
 else ()
@@ -101,12 +105,8 @@ install(TARGETS xilinxopencl
   ARCHIVE DESTINATION ${XRT_INSTALL_LIB_DIR} COMPONENT ${XRT_BASE_DEV_COMPONENT}
 )
 
-# Install static library - exclude from xrt-targets export in yocto builds
-# to avoid find_package(XRT) failures when static libs are not in sysroot
-if(XRT_YOCTO)
-  install(TARGETS xilinxopencl_static
-    ARCHIVE DESTINATION ${XRT_INSTALL_LIB_DIR} COMPONENT ${XRT_BASE_DEV_COMPONENT})
-else()
+# Enable install of static library iff requested
+if(XRT_INSTALL_STATIC_LIBRARY)
   install(TARGETS xilinxopencl_static
     EXPORT xrt-targets
     ARCHIVE DESTINATION ${XRT_INSTALL_LIB_DIR} COMPONENT ${XRT_BASE_DEV_COMPONENT})

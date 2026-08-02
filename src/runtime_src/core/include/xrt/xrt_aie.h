@@ -385,6 +385,7 @@ public:
    *  The device on which the profiling should start
    *
    */
+  [[deprecated("deprecated, please use profiling(hw_context) instead")]]
   explicit
   profiling(const xrt::device& device);
 
@@ -465,6 +466,7 @@ public:
    *
    * This constructor initializes a buffer object with the specified device, xclbin UUID, and string identifier. This throws an exception if no GMIO/External buffer exists with given name
    */
+  [[deprecated("deprecated, please use buffer(hw_context, name) instead")]]
   buffer(const xrt::device& device, const xrt::uuid& uuid, const std::string& name);
 
   /**

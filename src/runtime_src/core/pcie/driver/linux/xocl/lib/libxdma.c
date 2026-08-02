@@ -2068,9 +2068,16 @@ static resource_size_t map_single_bar(struct xdma_dev *xdev,
 	 */
 	xocl_pr_info("map bar %d, len %lld\n", idx, bar_len);
 	/* do not map BARs with length 0. Note that start MAY be 0! */
-	if (!bar_len || bar_len >= (1 << 25)) {
-		xocl_pr_info("BAR #%d is not present - skipping\n", idx);
+	if (!bar_len) {
+		pr_info("BAR #%d is not present - skipping\n", idx);
 		return 0;
+	}
+
+	/* BAR size exceeds maximum desired mapping? */
+	if (bar_len > INT_MAX) {
+		pr_info("Limit BAR %d mapping from %llu to %d bytes\n", idx,
+			(u64)bar_len, INT_MAX);
+		map_len = (resource_size_t)INT_MAX;
 	}
 
 	/*
@@ -4346,7 +4353,9 @@ MODULE_AUTHOR("Xilinx, Inc.");
 MODULE_DESCRIPTION(DRV_MODULE_DESC);
 MODULE_VERSION(DRV_MODULE_VERSION);
 MODULE_LICENSE("GPL v2");
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,16,0) || defined(RHEL_9_0_GE)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0) || defined(RHEL_10_1_GE)
+MODULE_IMPORT_NS("DMA_BUF");
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5,16,0) || defined(RHEL_9_0_GE)
 MODULE_IMPORT_NS(DMA_BUF);
 #endif
 
