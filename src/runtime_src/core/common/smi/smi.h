@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 // Local include files
@@ -18,6 +18,10 @@
 #include <vector>
 
 namespace xq = xrt_core::query;
+
+namespace xrt_core {
+class device;
+}
 
 namespace xrt_core::smi {
 
@@ -217,28 +221,34 @@ public:
 class smi_hardware_config {
 public:
   enum class hardware_type {
-    phx, // Phoenix
-    stxA0, // StrixA0
-    stxB0, // Strix B0
-    stxH, // Strix Halo
-    krk1, // Krackan
+    phx,
+    stxA0,
+    stxB0,
+    stxH,
+    krk1,
     npu3_f0, // deprecated
-    npu3_f1, // XXXXX
-    npu3_f2, // XXXXX
-    npu3_f3, // XXXXX
-    npu3_f4, // XXXXX
-    npu3_f5, // XXXXX
-    npu3_f6, // XXXXX 
-    npu3_f7, // XXXXX
-    npu3_f8, // XXXXX
-    npu3_f9, // XXXXX
-    npu3_f10, // XXXXX
-    npu3_f11, // XXXXX
-    npu3_f12, // XXXXX
-    npu3_B01, // XXXXX
-    npu3_B02, // XXXXX
-    npu3_B03, // XXXXX
-    aie2ps, // Telluride aie2ps
+    npu3_f1, // npu3 classic (17f1:10)
+    npu3_B01, // npu3 classic SWV (1B0A:00)
+    npu3a_pf, // npu3a PF (17f2:10)
+    npu3a_vf, // npu3a VF (17f3:10)
+    npu3_B02_pf, // npu3a PF SWV (1B0B:00)
+    npu3_B03_vf, // npu3a VF SWV (1B0C:00)
+    npu7, // npu7 classic (17f1:11)
+    npu7_pf,
+    npu7_vf,
+    npu8, // npu8 classic (17f1:12)
+    npu8_pf,
+    npu8_vf,
+    npu9, // npu9 classic (17f1:13)
+    npu9_pf,
+    npu9_vf,
+    npu10, // npu10 classic (17f1:14)
+    npu10_pf,
+    npu10_vf,
+    npu11, // npu11 classic (17f1:15)
+    npu11_pf,
+    npu11_vf,
+    aie2ps,
     unknown // Unknown hardware type
   };
 
@@ -251,13 +261,30 @@ public:
     unknown
   };
 
+  // NPU3 xrt-smi config variant (classic host, VF, or PF).
+  enum class npu3_variant {
+    classic,
+    vf,
+    pf,
+  };
+
   XRT_CORE_COMMON_EXPORT
   smi_hardware_config();
 
   // Returns the hardware type based on the PCIe ID and Revision ID.
   XRT_CORE_COMMON_EXPORT
-  hardware_type 
+  hardware_type
   get_hardware_type(const xq::pcie_id::data&) const;
+
+  // Returns the hardware type based on device / part name string (e.g. "xc2ve3858").
+  XRT_CORE_COMMON_EXPORT
+  hardware_type
+  get_hardware_type(const std::string& devid_str) const;
+
+  // Returns the hardware type for a device, checking device_id_str first, then pcie_id.
+  XRT_CORE_COMMON_EXPORT
+  hardware_type
+  get_hardware_type(const xrt_core::device* dev) const;
 
   // Maps a specific hardware_type to its family. All per-device case logic lives here.
   XRT_CORE_COMMON_EXPORT
@@ -271,15 +298,34 @@ public:
     return get_family(get_hardware_type(dev));
   }
 
+  XRT_CORE_COMMON_EXPORT
+  hardware_family
+  get_family(const std::string& devid_str) const
+  {
+    return get_family(get_hardware_type(devid_str));
+  }
+
+  XRT_CORE_COMMON_EXPORT
+  hardware_family
+  get_family(const xrt_core::device* dev) const
+  {
+    return get_family(get_hardware_type(dev));
+  }
+
   // AIE architecture version string for examine JSON; nullopt when unknown.
   XRT_CORE_COMMON_EXPORT
   static std::optional<std::string>
   get_aie_architecture_version(hardware_type hw);
 
-  // True for PHX and STX/KRK (AIE2/AIE2P); false for NPU3 (AIE4).
+  // True for PHX, STX/KRK, and AIE2PS (AIE2/AIE2P/AIE2PS); false for NPU3 (AIE4).
   XRT_CORE_COMMON_EXPORT
   static bool
   is_aie2_platform(hardware_type hw);
+
+  // NPU3 variant (classic host, VF, or PF) for xrt-smi config generator selection.
+  XRT_CORE_COMMON_EXPORT
+  static npu3_variant
+  get_npu3_variant(hardware_type hw);
 
   // Validate-runner archive path relative to the platform archive root.
   XRT_CORE_COMMON_EXPORT

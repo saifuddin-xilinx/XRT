@@ -170,6 +170,25 @@ public:
   }
 };
 
+// derive memory bank on the importing device from BO physical address
+static uint32_t
+get_imported_group_id(const device_type& dev, uint64_t paddr, uint32_t fallback)
+{
+  auto* core_dev = dev.get_core_device();
+  if (!core_dev)
+    return fallback;
+
+  auto mem_topology = core_dev->get_axlf_section<const ::mem_topology*>(ASK_GROUP_TOPOLOGY);
+  if (!mem_topology)
+    return fallback;
+
+  auto memidx = xrt_core::xclbin::address_to_memidx(mem_topology, paddr);
+  if (memidx == std::numeric_limits<int32_t>::max())
+    return fallback;
+
+  return static_cast<uint32_t>(memidx);
+}
+
 } // namespace
 
 namespace xrt {
@@ -212,6 +231,11 @@ private:
     xcl_bo_flags xflags {prop.flags};
     grpid = xflags.bank;
     flags = static_cast<bo::flags>(xflags.flags & ~XRT_BO_FLAGS_MEMIDX_MASK);
+
+    // imported BOs share physical backing from another device; remap the
+    // bank index against this device's MEM_TOPOLOGY
+    if (is_imported())
+      grpid = get_imported_group_id(device, addr, grpid);
   }
 
   // Usage logger for logging buffer stats
@@ -345,13 +369,21 @@ public:
     throw xrt_core::error("buffer is not mapped");
   }
 
-  export_handle
+  virtual export_handle
   export_buffer() const
   {
     if (!shared_handle)
       shared_handle = handle->share();
 
     return shared_handle->get_export_handle();
+  }
+
+  // Returns the underlying allocation for this BO.
+  // For a regular BO this is itself; buffer_sub overrides to walk to the backing allocation.
+  virtual std::shared_ptr<bo_impl>
+  get_allocation()
+  {
+    return shared_from_this();
   }
 
   virtual void
@@ -946,6 +978,22 @@ public:
     return true;
   }
 
+  export_handle
+  export_buffer() const override
+  {
+    throw xrt_core::error(-EINVAL,
+      "Export of a sub-buffer is not supported. "
+      "Call get_allocation() to obtain the underlying buffer, export that, "
+      "then recreate the sub-buffer on the import side using the original offset and size.");
+  }
+
+  std::shared_ptr<bo_impl>
+  get_allocation() override
+  {
+    // Walk to the backing allocation, handling nested sub-buffers.
+    return m_parent->get_allocation();
+  }
+
   size_t
   get_offset() const override
   {
@@ -955,7 +1003,12 @@ public:
   uint64_t
   get_address() const override
   {
-    return bo_impl::get_address() + m_offset;
+    // Compose through the parent, which may itself be a sub-buffer.  The
+    // base implementation resolves the address from the shim handle, and
+    // bo_impl(parent, size) copies that handle transitively, so it yields
+    // the root buffer's address and drops any intermediate offset.  This
+    // matches how m_hbuf and sync() already recurse through m_parent.
+    return m_parent->get_address() + m_offset;
   }
 
   void
@@ -1049,7 +1102,7 @@ namespace {
 // deleted if no other shared ptrs exists for this buffer
 static xrt_core::handle_map<xrtBufferHandle, std::shared_ptr<xrt::bo_impl>> bo_cache;
 
-static const std::shared_ptr<xrt::bo_impl>&
+static std::shared_ptr<xrt::bo_impl>
 get_boh(xrtBufferHandle bhdl)
 {
   return bo_cache.get_or_error(bhdl);
@@ -1532,6 +1585,13 @@ export_buffer()
   return xdp::native::profiling_wrapper("xrt::bo::export_buffer", [this]{
     return handle->export_buffer();
   });
+}
+
+bo
+bo::
+get_allocation()
+{
+  return bo{handle->get_allocation()};
 }
 
 void

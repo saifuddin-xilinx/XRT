@@ -129,6 +129,9 @@ zocl_load_bitstream(struct drm_zocl_dev *zdev, char *buffer, int length,
 	char *data = NULL;
 	size_t i;
 
+	if (length <= 0)
+		return -EINVAL;
+
 	memset(&bit_header, 0, sizeof(bit_header));
 	if (xrt_xclbin_parse_header(buffer, DMA_HWICAP_BITFILE_BUFFER_SIZE,
 	    &bit_header)) {
@@ -136,7 +139,12 @@ zocl_load_bitstream(struct drm_zocl_dev *zdev, char *buffer, int length,
 		return -EINVAL;
 	}
 
-	if ((bit_header.HeaderLength + bit_header.BitstreamLength) > length) {
+	/* HeaderLength and BitstreamLength are 32-bit. Adding them in
+	 * unsigned int wraps, and the following byte-swap
+	 * would then walk off the section buffer.
+	 */
+	if ((uint64_t)bit_header.HeaderLength +
+	    (uint64_t)bit_header.BitstreamLength > (uint64_t)length) {
 		DRM_ERROR("bitstream header+stream length parse failed");
 		return -EINVAL;
 	}
@@ -609,6 +617,51 @@ void zocl_free_sections(struct drm_zocl_dev *zdev, struct drm_zocl_slot *slot)
 	slot->axlf_size = 0;
 	write_unlock(&zdev->attr_rwlock);
 }
+
+#if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
+/*
+ * Remove a PARTITION_METADATA overlay that was applied when this slot's
+ * xclbin was loaded. Called when the last hw_context on the slot is destroyed.
+ */
+void zocl_slot_remove_xclbin_overlay(struct drm_zocl_dev *zdev,
+				     struct drm_zocl_slot *slot)
+{
+	int err;
+
+	if (!zdev || !slot || slot->partial_overlay_id == -1)
+		return;
+
+	mutex_lock(&slot->slot_xclbin_lock);
+	if (zocl_bitstream_is_locked(zdev, slot))
+		goto unlock;
+
+	zocl_destroy_cu_slot(zdev, slot->slot_idx);
+
+	WRITE_ONCE(zdev->overlay_self_task, current);
+	err = of_overlay_remove(&slot->partial_overlay_id);
+	WRITE_ONCE(zdev->overlay_self_task, NULL);
+	if (err < 0) {
+		/* Tree unchanged, nothing to re-probe. */
+		DRM_WARN("%s: overlay remove failed (%d)\n", __func__, err);
+		goto unlock;
+	}
+
+	slot->partial_overlay_id = -1;
+	DRM_INFO("%s: removed xclbin DT overlay from slot %d\n",
+		 __func__, slot->slot_idx);
+
+	/* CU INTC is device global, only slot 0 owns CUs. */
+	if (slot->slot_idx == 0)
+		zocl_cu_intc_refresh(zdev);
+unlock:
+	mutex_unlock(&slot->slot_xclbin_lock);
+}
+#else
+void zocl_slot_remove_xclbin_overlay(struct drm_zocl_dev *zdev,
+				     struct drm_zocl_slot *slot)
+{
+}
+#endif
 
 /*
  * Load a bitstream, partial metadata or PDI to the FPGA from userspace pointer.

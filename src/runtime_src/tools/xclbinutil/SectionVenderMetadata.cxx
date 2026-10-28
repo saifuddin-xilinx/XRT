@@ -5,7 +5,6 @@
 #include "XclBinUtilities.h"
 #include <boost/algorithm/string.hpp>
 #include <boost/format.hpp>
-#include <boost/functional/factory.hpp>
 #include <boost/property_tree/json_parser.hpp>
 
 namespace XUtil = XclBinUtilities;
@@ -20,7 +19,7 @@ SectionVenderMetadata::init SectionVenderMetadata::initializer;
 
 SectionVenderMetadata::init::init()
 {
-  auto sectionInfo = std::make_unique<SectionInfo>(VENDER_METADATA, "VENDER_METADATA", boost::factory<SectionVenderMetadata*>());
+  auto sectionInfo = std::make_unique<SectionInfo>(VENDER_METADATA, "VENDOR_METADATA", []{ return new SectionVenderMetadata(); });
   sectionInfo->supportsSubSections = true;
 
   // There is only one-subsection that is supported.  By default it is not named.
@@ -75,7 +74,7 @@ SectionVenderMetadata::copyBufferUpdateMetadata(const char* _pOrigDataSection,
                               "Original: \n"
                               "  mpo_name (0x%lx): '%s'\n"
                               "  m_image_offset: 0x%lx, m_image_size: 0x%lx\n")
-                          % pHdr->mpo_name % (reinterpret_cast<const char*>(pHdr) + pHdr->mpo_name)
+                          % pHdr->mpo_name % XUtil::bounded_mpo_cstr(pHdr, pHdr->mpo_name, _origSectionSize)
                           % pHdr->m_image_offset % pHdr->m_image_size));
 
   // Get the JSON metadata
@@ -106,7 +105,7 @@ SectionVenderMetadata::copyBufferUpdateMetadata(const char* _pOrigDataSection,
   // Update and record the variables
   // mpo_name
   {
-    auto sDefault = reinterpret_cast<const char*>(pHdr) + sizeof(vender_metadata) + pHdr->mpo_name;
+    auto sDefault = XUtil::bounded_mpo_cstr(pHdr, pHdr->mpo_name, _origSectionSize);
     auto sValue = ptSK.get<std::string>("mpo_name", sDefault);
 
     if (sValue.compare(getSectionIndexName()) != 0) {
@@ -136,7 +135,12 @@ SectionVenderMetadata::copyBufferUpdateMetadata(const char* _pOrigDataSection,
   std::string sStringBlock = stringBlock.str();
   _buffer.write(sStringBlock.c_str(), sStringBlock.size());
 
-  // Image
+  // Image — validate offset+size against the original section before reading
+  {
+    uint64_t img_end = static_cast<uint64_t>(pHdr->m_image_offset) + pHdr->m_image_size;
+    if (img_end > _origSectionSize)
+      throw std::runtime_error("vender_metadata m_image_offset/m_image_size out of bounds");
+  }
   _buffer.write(reinterpret_cast<const char*>(pHdr) + pHdr->m_image_offset, pHdr->m_image_size);
 }
 
@@ -145,7 +149,7 @@ SectionVenderMetadata::copyBufferUpdateMetadata(const char* _pOrigDataSection,
 void
 SectionVenderMetadata::createDefaultImage(std::istream& _istream, std::ostringstream& _buffer) const
 {
-  XUtil::TRACE("VENDER_METADATA IMAGE");
+  XUtil::TRACE("VENDOR_METADATA IMAGE");
 
   vender_metadata venderMetadataHdr = vender_metadata{};
   std::ostringstream stringBlock;       // String block (stored immediately after the header)
@@ -231,6 +235,12 @@ SectionVenderMetadata::writeObjImage(std::ostream& _oStream) const
   // Now look at the data
   auto pHdr = reinterpret_cast<vender_metadata*>(m_pBuffer);
 
+  {
+    uint64_t img_end = static_cast<uint64_t>(pHdr->m_image_offset) + pHdr->m_image_size;
+    if (img_end > m_bufferSize)
+      throw std::runtime_error("vender_metadata m_image_offset/m_image_size out of bounds");
+  }
+
   auto pFWBuffer = reinterpret_cast<const char*>(pHdr) + pHdr->m_image_offset;
   _oStream.write(pFWBuffer, pHdr->m_image_size);
 }
@@ -240,7 +250,7 @@ SectionVenderMetadata::writeObjImage(std::ostream& _oStream) const
 void
 SectionVenderMetadata::writeMetadata(std::ostream& _oStream) const
 {
-  XUtil::TRACE("VENDER_METADATA writeMetadata");
+  XUtil::TRACE("VENDOR_METADATA writeMetadata");
   // Overlay the structure
   // Do we have enough room to overlay the header structure
   if (m_bufferSize < sizeof(vender_metadata)) {
@@ -320,7 +330,7 @@ SectionVenderMetadata::readXclBinBinary(std::istream& _istream, const axlf_secti
   if (ptVenderMetadata.empty())
     throw std::runtime_error("ERROR: copyBufferUpdateMetadata could not find the vender_metadata section.");
 
-  XUtil::TRACE_PrintTree("Current VENDER_METADATA contents", pt);
+  XUtil::TRACE_PrintTree("Current VENDOR_METADATA contents", pt);
   auto sName = ptVenderMetadata.get<std::string>("mpo_name");
 
   Section::m_sIndexName = sName;

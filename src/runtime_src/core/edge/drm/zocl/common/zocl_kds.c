@@ -15,6 +15,7 @@
 #include "zocl_util.h"
 #include "zocl_xclbin.h"
 #include "zocl_kds.h"
+#include "zocl_aie.h"
 #include "kds_core.h"
 #include "kds_ert_table.h"
 #include "xclbin.h"
@@ -286,6 +287,56 @@ out:
 }
 
 /*
+ * Release hw contexts on client exit. Legacy apps use ctx_list for
+ * bitstream unlock; hw_context API apps need unlock here.
+ *
+ * The caller must have run kds_fini_client_ctxs() first, since a hw context
+ * cannot be freed while CU contexts still reference it.
+ */
+static void zocl_fini_client_hw_ctxs(struct drm_zocl_dev *zdev,
+				     struct kds_client *client)
+{
+	struct kds_client_hw_ctx *hw_ctx, *next;
+	struct zocl_hw_graph_ctx *graph_ctx;
+	struct list_head *gptr, *gnext;
+	struct drm_zocl_slot *slot;
+	uuid_t *xclbin_id;
+	u32 s_id;
+	bool unlock = list_empty(&client->ctx_list);
+
+	mutex_lock(&client->lock);
+	list_for_each_entry_safe(hw_ctx, next, &client->hw_ctx_list, link) {
+		list_for_each_safe(gptr, gnext, &hw_ctx->graph_ctx_list) {
+			graph_ctx = list_entry(gptr, struct zocl_hw_graph_ctx, link);
+			list_del(gptr);
+			kfree(graph_ctx);
+		}
+
+		slot = zdev->pr_slot[hw_ctx->slot_idx];
+		s_id = hw_ctx->slot_idx;
+		xclbin_id = hw_ctx->xclbin_id;
+		if (kds_free_hw_ctx(client, hw_ctx) || !unlock)
+			continue;
+
+		if (slot && xclbin_id)
+			(void)zocl_unlock_bitstream(slot, xclbin_id);
+
+		if (slot && --slot->hwctx_ref_cnt == 0) {
+			/*
+			 * Drop this slot's AIE state. zocl_destroy_aie releases
+			 * the partition unless libdfx owns it. libdfx's overlay
+			 * rmdir runs after this ioctl and is that partition's
+			 * aie_part_remove.
+			 */
+			zocl_destroy_aie(slot);
+			zdev->slot_mask &= ~(1 << s_id);
+			zocl_slot_remove_xclbin_overlay(zdev, slot);
+		}
+	}
+	mutex_unlock(&client->lock);
+}
+
+/*
  * Destroy the given client and delete it from the KDS.
  *
  * @param	zdev:	zocl device structure
@@ -310,11 +361,14 @@ void zocl_destroy_client(void *client_hdl)
 
 	kds = &zdev->kds;
 
-	/* kds_fini_client should released resources hold by the client.
-	 * release xclbin_id and unlock bitstream if needed.
+	/* Teardown runs in three ordered phases. A kds_client_hw_ctx must
+	 * outlive every kds_client_cu_ctx that references it, and
+	 * kds_fini_client() destroys client->lock, which phase 2 needs.
 	 */
 	zocl_aie_kds_del_graph_context_all(client);
-	kds_fini_client(kds, client);
+	kds_fini_client_ctxs(kds, client);	/* drain and free CU contexts */
+	zocl_fini_client_hw_ctxs(zdev, client);	/* unlock and free hw contexts */
+	kds_fini_client(kds, client);		/* destroy the client */
 
 	/* Delete all the existing context associated to this device for this
 	 * client.
@@ -452,10 +506,13 @@ int zocl_kds_update(struct drm_zocl_dev *zdev, struct drm_zocl_slot *slot,
 	}
 
 	// Check for polling mode and enable CU interrupt if polling_mode is false
-	if (cfg->polling)
+	if (cfg->polling) {
 		zdev->kds.cu_intr = 0;
-	else
+		zdev->kds.force_polling = true;
+	} else {
 		zdev->kds.cu_intr = 1;
+		zdev->kds.force_polling = false;
+	}
 
 	return kds_cfg_update(&zdev->kds);
 }

@@ -65,6 +65,7 @@ public:
    *  Open the graph with specified access (default primary)
    */
   [[deprecated("deprecated, please use graph(hw_context, name) instead")]]
+  XRT_API_EXPORT
   graph(const xrt::device& device, const xrt::uuid& xclbin_id, const std::string& name,
         access_mode am = access_mode::primary);
 
@@ -78,6 +79,7 @@ public:
    * @param am
    *  Open the graph with specified access (default primary)
    */
+  XRT_API_EXPORT
   graph(const xrt::hw_context& ctx, const std::string& name,
         access_mode am = access_mode::primary);
 
@@ -86,6 +88,7 @@ public:
    *
    * Reset graph by disabling tiles and enable tiles reset
    */
+  XRT_API_EXPORT
   void
   reset() const;
 
@@ -95,6 +98,7 @@ public:
    * @return
    * Timestamp in AIE cycle
    */
+  XRT_API_EXPORT
   uint64_t
   get_timestamp() const;
 
@@ -106,6 +110,7 @@ public:
    * @return
    *   Bank index for xrt::aie::bo(hwctx, size, flags, bank_id).
    */
+  XRT_API_EXPORT
   uint32_t
   gmio_bank_id(const std::string& gmio_name) const;
 
@@ -121,6 +126,7 @@ public:
    * default, run forever; or run a fixed number of iterations if specified
    * during compilation time.
    */
+  XRT_API_EXPORT
   void
   run(uint32_t iterations = 0);
 
@@ -135,6 +141,7 @@ public:
    *
    * The current thread will block until graph run completes or timeout.
    */
+  XRT_API_EXPORT
   void
   wait(std::chrono::milliseconds timeout_ms);
 
@@ -155,6 +162,7 @@ public:
    *
    * The current thread will block until graph is paused.
    */
+  XRT_API_EXPORT
   void
   wait(uint64_t cycles = 0);
 
@@ -163,6 +171,7 @@ public:
    *
    * Suspend graph execution.
    */
+  XRT_API_EXPORT
   void
   suspend();
 
@@ -171,6 +180,7 @@ public:
    *
    * Resume graph execution which was paused by suspend() or wait(cycles) APIs
    */
+  XRT_API_EXPORT
   void
   resume();
 
@@ -191,6 +201,7 @@ public:
    *
    * The current thread will block until graph is terminated.
    */
+  XRT_API_EXPORT
   void
   end(uint64_t cycles = 0);
 
@@ -256,14 +267,94 @@ public:
     read_port(port_name, value, bytes);
   }
 
+  /**
+   * update_nb() - Update graph Run Time Parameters without blocking.
+   *
+   * @param port_name
+   *  Hierarchical name of RTP port.
+   * @param arg
+   *  The argument to set.
+   *
+   * Return 0 on success, EAGAIN if RTP lock is unavailable.
+   */
+  template<typename ArgType>
+  int
+  update_nb(const std::string& port_name, const ArgType& arg)
+  {
+    return update_nb(port_name, &arg, sizeof(arg));
+  }
+
+  /**
+   * update_nb() - Update graph Run Time Parameters without blocking.
+   *
+   * @param port_name
+   *  Hierarchical name of RTP port.
+   * @param value
+   *  Pointer to the RTP value.
+   * @param bytes
+   *  The size in bytes of the RTP value.
+   *
+   * Return 0 on success, EAGAIN if RTP lock is unavailable.
+   */
+  int
+  update_nb(const std::string& port_name, const void* value, size_t bytes)
+  {
+    return update_port_nb(port_name, value, bytes);
+  }
+
+  /**
+   * read_nb() - Read graph Run Time Parameters value without blocking.
+   *
+   * @param port_name
+   *  Hierarchical name of RTP port.
+   * @param arg
+   *  The RTP value is written to.
+   *
+   * Return 0 on success, EAGAIN if RTP lock is unavailable.
+   */
+  template<typename ArgType>
+  int
+  read_nb(const std::string& port_name, ArgType& arg)
+  {
+    return read_nb(port_name, &arg, sizeof(arg));
+  }
+
+  /**
+   * read_nb() - Read graph Run Time Parameters value without blocking.
+   *
+   * @param port_name
+   *  Hierarchical name of RTP port.
+   * @param value
+   *  Data pointer to hold the RTP value.
+   * @param bytes
+   *  The size in bytes of the data to be read.
+   *
+   * Return 0 on success, EAGAIN if RTP lock is unavailable.
+   */
+  int
+  read_nb(const std::string& port_name, void* value, size_t bytes)
+  {
+    return read_port_nb(port_name, value, bytes);
+  }
+
 private:
   std::shared_ptr<graph_impl> handle;
 
+  XRT_API_EXPORT
   void
   update_port(const std::string& port_name, const void* value, size_t bytes);
 
+  XRT_API_EXPORT
   void
   read_port(const std::string& port_name, void* value, size_t bytes);
+
+  XRT_API_EXPORT
+  int
+  update_port_nb(const std::string& port_name, const void* value, size_t bytes);
+
+  XRT_API_EXPORT
+  int
+  read_port_nb(const std::string& port_name, void* value, size_t bytes);
 };
 
 } // namespace xrt

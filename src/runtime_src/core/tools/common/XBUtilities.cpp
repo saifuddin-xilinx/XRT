@@ -6,6 +6,7 @@
 #include "XBUtilitiesCore.h"
 
 #include "common/error.h"
+#include "common/info_platform.h"
 #include "common/info_vmr.h"
 #include "common/utils.h"
 #include "common/message.h"
@@ -27,6 +28,7 @@
 #include <iostream>
 #include <map>
 #include <regex>
+#include <set>
 #include <stdexcept>
 
 
@@ -62,6 +64,50 @@ struct fdt_header {
 };
 
 namespace xq = xrt_core::query;
+
+namespace {
+
+// User-domain paths enumerate user devices first, then mgmt devices.
+// Mgmt-domain paths (xbmgmt) use mgmt devices only.
+std::pair<bool, xrt_core::device::id_type>
+map_device_index(xrt_core::device::id_type index, bool in_user_domain)
+{
+  if (!in_user_domain)
+    return {false, index};
+
+  const auto user_total = xrt_core::get_total_devices(true).first;
+  if (index < user_total)
+    return {true, index};
+  return {false, index - user_total};
+}
+
+} // namespace
+
+xrt_core::device::id_type
+XBUtilities::get_enumerated_device_count(bool inUserDomain)
+{
+  if (!inUserDomain)
+    return xrt_core::get_total_devices(false).first;
+
+  const auto user_total = xrt_core::get_total_devices(true).first;
+  const auto mgmt_total = xrt_core::get_total_devices(false).first;
+
+  // xrt-smi user domain: include mgmt PF only on Ryzen (NPU) platforms.
+  if (mgmt_total) {
+    try {
+      const auto device = xrt_core::get_mgmtpf_device(0);
+      const auto device_class = xrt_core::device_query_default<xq::device_class>(
+        device, xq::device_class::type::alveo);
+      if (device_class == xq::device_class::type::ryzen)
+        return user_total + mgmt_total;
+    }
+    catch (const std::exception&) {
+      // mgmt present but not accessible; omit from xrt-smi user enumeration
+    }
+  }
+
+  return user_total;
+}
 
 // ------ F U N C T I O N S ---------------------------------------------------
 
@@ -112,7 +158,7 @@ XBUtilities::get_available_bdfs(bool inUserDomain)
         pt_dev.put("vbnv", xrt_core::device_query<xrt_core::query::rom_vbnv>(device));
         break;
       case xrt_core::query::device_class::type::ryzen:
-        pt_dev.put("name", xrt_core::device_query<xrt_core::query::rom_vbnv>(device));
+        pt_dev.put("name", xrt_core::platform::get_device_name(device.get()));
         break;
       }
     }
@@ -152,7 +198,7 @@ XBUtilities::get_available_devices(bool inUserDomain)
         pt_dev.put("vbnv", xrt_core::device_query<xrt_core::query::rom_vbnv>(device));
         break;
       case xrt_core::query::device_class::type::ryzen:
-        pt_dev.put("name", xrt_core::device_query<xrt_core::query::rom_vbnv>(device));
+        pt_dev.put("name", xrt_core::platform::get_device_name(device.get()));
         break;
       }
 
@@ -212,9 +258,7 @@ XBUtilities::get_available_devices(bool inUserDomain)
       }
 
       try {
-        const auto& pcie_id = xrt_core::device_query<xrt_core::query::pcie_id>(device);
-        xrt_core::smi::smi_hardware_config smi_hrdw;
-        const auto hardware_type = smi_hrdw.get_hardware_type(pcie_id);
+        const auto hardware_type = XBUtilities::get_hardware_type(device.get());
         const auto aie_arch = xrt_core::smi::smi_hardware_config::get_aie_architecture_version(hardware_type);
         pt_dev.put("aie_architecture_version", aie_arch.value_or("N/A"));
       }
@@ -225,7 +269,7 @@ XBUtilities::get_available_devices(bool inUserDomain)
       try {
         auto instance = xrt_core::device_query<xrt_core::query::instance>(device);
         std::string pf = device->is_userpf() ? "user" : "mgmt";
-        pt_dev.put("instance",boost::str(boost::format("%s(inst=%d)") % pf % instance));
+        pt_dev.put("instance", boost::str(boost::format("%s(inst=%d)") % pf % instance));
       }
       catch(const xrt_core::query::exception&) {
           // The instance wasn't added
@@ -236,6 +280,7 @@ XBUtilities::get_available_devices(bool inUserDomain)
 
     pt.push_back(std::make_pair("", pt_dev));
   }
+
   return pt;
 }
 
@@ -247,16 +292,9 @@ XBUtilities::resolve_device(bool is_user_domain,
   const auto& device_var = vm["device"];
   if (device_var.defaulted()) {
     if (boost::iequals(device_bdf, "default")) {
-      device_bdf.clear();
       boost::property_tree::ptree available_devices = get_available_bdfs(is_user_domain);
       if (available_devices.empty())
         throw std::runtime_error("No devices found.");
-      if (available_devices.size() > 1) {
-        std::cerr << "\nERROR: Multiple devices found. Please specify a single device using the --device option\n\n";
-        std::cerr << str_available_devs(is_user_domain) << std::endl;
-        std::cout << std::endl;
-        throw xrt_core::error(std::errc::operation_canceled);
-      }
       const auto kd = available_devices.begin();
       device_bdf = kd->second.get<std::string>("bdf");
     }
@@ -286,10 +324,13 @@ XBUtilities::filter_subcmds(bool is_user_domain,
       const std::string& name = cmd->getName();
       for (const auto& row : rows) {
         const std::string& n = std::get<0>(row);
-        if (!n.empty() && n == name) {
-          out.emplace_back(cmd);
+        if (n.empty() || n != name)
+          continue;
+        // Subcommands typed "advanced" are omitted unless --advanced was passed.
+        if (std::get<2>(row) == "advanced" && !getAdvance())
           break;
-        }
+        out.emplace_back(cmd);
+        break;
       }
     }
     return out;
@@ -363,9 +404,13 @@ try {
   // Iterate through the available devices to find a BDF match
   // This must not open any devices! Doing do would slow down the software
   // quite a bit and cause other undesirable side affects
-auto devices = _inUserDomain ? xrt_core::get_total_devices(true).first : xrt_core::get_total_devices(false).first;
-  for (decltype(devices) i = 0; i < devices; i++) {
-    auto bdf = xrt_core::get_bdf_info(i, _inUserDomain);
+  const auto device_count = XBUtilities::get_enumerated_device_count(_inUserDomain);
+  for (xrt_core::device::id_type i = 0; i < device_count; ++i) {
+    const auto mapped = map_device_index(i, _inUserDomain);
+    const bool is_user = mapped.first;
+    const xrt_core::device::id_type domain_index = mapped.second;
+
+    auto bdf = xrt_core::get_bdf_info(domain_index, is_user);
     //if the user specifies func, compare
     //otherwise safely ignore
     auto cmp_func = [bdf](uint16_t func)
@@ -388,27 +433,31 @@ get_device_internal(xrt_core::device::id_type index, bool in_user_domain)
   static std::mutex mutex;
   std::lock_guard guard(mutex);
 
-  if (in_user_domain) {
+  const auto mapped = map_device_index(index, in_user_domain);
+  const bool is_user = mapped.first;
+  const xrt_core::device::id_type domain_index = mapped.second;
+
+  if (is_user) {
     static std::vector<std::shared_ptr<xrt_core::device>> user_devices(xrt_core::get_total_devices(true).first, nullptr);
   
-    if (user_devices.size() <= index )
+    if (user_devices.size() <= domain_index )
       throw std::runtime_error("no device present with index " + std::to_string(index));
     
-    if (!user_devices[index])
-      user_devices[index] = xrt_core::get_userpf_device(index);
+    if (!user_devices[domain_index])
+      user_devices[domain_index] = xrt_core::get_userpf_device(domain_index);
 
-    return user_devices[index];
+    return user_devices[domain_index];
   }
 
   static std::vector<std::shared_ptr<xrt_core::device>> mgmt_devices(xrt_core::get_total_devices(false).first, nullptr);
   
-  if (mgmt_devices.size() <= index )
+  if (mgmt_devices.size() <= domain_index )
     throw std::runtime_error("no device present with index " + std::to_string(index));
 
-  if (!mgmt_devices[index])
-    mgmt_devices[index] = xrt_core::get_mgmtpf_device(index);
+  if (!mgmt_devices[domain_index])
+    mgmt_devices[domain_index] = xrt_core::get_mgmtpf_device(domain_index);
 
-  return mgmt_devices[index];
+  return mgmt_devices[domain_index];
 }
 
 /*
@@ -419,7 +468,7 @@ static uint16_t
 str2index(const std::string& str, bool _inUserDomain)
 {
   //throw an error if no devices are present
-  uint64_t devices = _inUserDomain ? xrt_core::get_total_devices(true).first : xrt_core::get_total_devices(false).first;
+  uint64_t devices = XBUtilities::get_enumerated_device_count(_inUserDomain);
   if (devices == 0)
     throw std::runtime_error("No devices found");
   try {
@@ -470,7 +519,7 @@ XBUtilities::collect_devices( const std::set<std::string> &_deviceBDFs,
     xrt_core::device::id_type total = 0;
     try {
       // If there are no devices in the server a runtime exception is thrown in  mgmt.cpp probe()
-      total = (xrt_core::device::id_type) xrt_core::get_total_devices(_inUserDomain /*isUser*/).first;
+      total = XBUtilities::get_enumerated_device_count(_inUserDomain);
     } catch (...) {
       /* Do nothing */
     }
@@ -776,6 +825,7 @@ static const std::map<std::string, xrt_core::query::reset_type> reset_map = {
     { "soft-kernel", xrt_core::query::reset_type(xrt_core::query::reset_key::soft_kernel, "SOFT KERNEL Reset", "", "mgmt_reset", "", "5") },
     { "aie", xrt_core::query::reset_type(xrt_core::query::reset_key::aie, "AIE Reset", "", "mgmt_reset", "", "6") },
     { "user", xrt_core::query::reset_type(xrt_core::query::reset_key::user, "HOT Reset", "", "", "", "") },
+    { "flr", xrt_core::query::reset_type(xrt_core::query::reset_key::flr, "FLR Reset", "", "", "", "") },
   };
 
 xrt_core::query::reset_type
@@ -944,9 +994,13 @@ fill_xrt_versions(const boost::property_tree::ptree& pt_xrt,
     output << boost::format("  %-20s : %s\n") % "Hash Date" % build_hash_date;
 
   const boost::property_tree::ptree& available_drivers = pt_xrt.get_child("drivers", empty_ptree);
+  std::set<std::string> reported_drivers;
   for(auto& drv : available_drivers) {
     const boost::property_tree::ptree& driver = drv.second;
     auto drv_name = driver.get<std::string>("name", "N/A");
+    if (!reported_drivers.insert(drv_name).second)
+      continue;
+
     auto drv_hash = driver.get<std::string>("hash", "N/A");
     auto drv_ver = driver.get<std::string>("version", "N/A");
 
@@ -1056,6 +1110,34 @@ XBUtilities::
 is_strix_hardware(xrt_core::smi::smi_hardware_config::hardware_type hw_type)
 {
   return xrt_core::smi::smi_hardware_config::is_aie2_platform(hw_type);
+}
+
+xrt_core::smi::smi_hardware_config::hardware_type
+XBUtilities::
+get_hardware_type(const xrt_core::device* dev)
+{
+  if (!dev)
+    return xrt_core::smi::smi_hardware_config::hardware_type::unknown;
+
+  xrt_core::smi::smi_hardware_config smi_hrdw;
+
+  try {
+    const auto name = xrt_core::device_query_default<xrt_core::query::device_id_str>(dev, std::string{});
+    const auto hw = smi_hrdw.get_hardware_type(name);
+    if (hw != xrt_core::smi::smi_hardware_config::hardware_type::unknown)
+      return hw;
+  }
+  catch (...) {
+  }
+
+  try {
+    const auto pcie_id = xrt_core::device_query<xrt_core::query::pcie_id>(dev);
+    return smi_hrdw.get_hardware_type(pcie_id);
+  }
+  catch (...) {
+  }
+
+  return xrt_core::smi::smi_hardware_config::hardware_type::unknown;
 }
 
 std::string

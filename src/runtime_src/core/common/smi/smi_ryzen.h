@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -13,11 +14,12 @@ namespace xrt_core::smi::ryzen {
 
 // Ryzen / NPU xrt-smi JSON config generators (shared by XDNA shim, MCDM, etc.).
 class config_gen_ryzen : public xrt_core::smi::config_generator {
+protected:
   std::vector<xrt_core::smi::basic_option> validate_test_desc;
   std::vector<xrt_core::smi::basic_option> examine_report_desc;
 
 public:
-  config_gen_ryzen();
+  config_gen_ryzen() = default;
 
   virtual const std::vector<xrt_core::smi::basic_option>&
   get_validate_test_desc() const
@@ -40,42 +42,23 @@ public:
   xrt_core::smi::subcommand
   create_configure_subcommand() override;
 
+  // Creates the "reset" subcommand; std::nullopt when reset is not supported.
+  virtual std::optional<xrt_core::smi::subcommand>
+  create_reset_subcommand()
+  {
+    return std::nullopt;
+  }
+
 };
 
 class config_gen_phoenix : public config_gen_ryzen {
-  std::vector<xrt_core::smi::basic_option> validate_test_desc;
-
 public:
   config_gen_phoenix();
-
-  const std::vector<xrt_core::smi::basic_option>&
-  get_validate_test_desc() const override
-  {
-    return validate_test_desc;
-  }
 };
 
-class config_gen_strix : public config_gen_ryzen {
-};
-
-class config_gen_npu3 : public config_gen_ryzen {
-  std::vector<xrt_core::smi::basic_option> examine_report_desc;
-  std::vector<xrt_core::smi::basic_option> validate_test_desc;
-
+class config_gen_aie2ps : public config_gen_ryzen {
 public:
-  config_gen_npu3();
-
-  const std::vector<xrt_core::smi::basic_option>&
-  get_examine_report_desc() const override
-  {
-    return examine_report_desc;
-  }
-
-  const std::vector<xrt_core::smi::basic_option>&
-  get_validate_test_desc() const override
-  {
-    return validate_test_desc;
-  }
+  config_gen_aie2ps();
 };
 
 void

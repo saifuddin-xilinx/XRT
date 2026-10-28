@@ -29,6 +29,9 @@
 
 namespace XBUtilities {
 
+  xrt_core::device::id_type
+  get_enumerated_device_count(bool inUserDomain);
+
   class Timer {
   private:
     std::chrono::high_resolution_clock::time_point m_time_start;
@@ -172,6 +175,9 @@ namespace XBUtilities {
 
   bool
   is_strix_hardware(xrt_core::smi::smi_hardware_config::hardware_type hw_type);
+
+  xrt_core::smi::smi_hardware_config::hardware_type
+  get_hardware_type(const xrt_core::device* dev);
 
   void
   printAdvancedDisclaimer();

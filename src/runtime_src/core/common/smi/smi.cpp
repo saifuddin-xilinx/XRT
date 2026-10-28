@@ -5,6 +5,7 @@
 
 // Local - Include Files
 #include "core/common/smi/smi.h"
+#include "core/common/device.h"
 
 // 3rd Party Library - Include Files
 #include <boost/property_tree/json_parser.hpp>
@@ -158,42 +159,120 @@ instance()
 smi_hardware_config::
 smi_hardware_config()
 {
-  // NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers) 
+  // NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
+  // PCI ID map aligned with NPU product table (device_id, revision_id) -> hardware_type.
   hardware_map = {
+    // npu1
     {{0x1502, 0x00}, hardware_type::phx},
+
+    // npu2
     {{0x17f0, 0x00}, hardware_type::stxA0},
+
+    // npu4
     {{0x17f0, 0x10}, hardware_type::stxB0},
+
+    // npu5
     {{0x17f0, 0x11}, hardware_type::stxH},
+
+    // npu6
     {{0x17f0, 0x20}, hardware_type::krk1},
-    {{0x17f1, 0x00}, hardware_type::npu3_f0}, //deprecated
-    {{0x17f1, 0x10}, hardware_type::npu3_f1}, 
-    {{0x17f2, 0x10}, hardware_type::npu3_f2}, 
-    {{0x17f3, 0x10}, hardware_type::npu3_f3},
-    {{0x17f1, 0x12}, hardware_type::npu3_f4},
-    {{0x17f1, 0x13}, hardware_type::npu3_f5},
-    {{0x17f1, 0x15}, hardware_type::npu3_f6},
-    {{0x17f1, 0x11}, hardware_type::npu3_f7},
-    {{0x17f3, 0x11}, hardware_type::npu3_f8},
-    {{0x17f3, 0x12}, hardware_type::npu3_f9},
-    {{0x17f1, 0x14}, hardware_type::npu3_f10},
-    {{0x17f3, 0x13}, hardware_type::npu3_f11},
-    {{0x17f3, 0x14}, hardware_type::npu3_f12},
+
+    // npu3 classic (17f1:10 / 1B0A:00)
+    {{0x17f1, 0x00}, hardware_type::npu3_f0}, // deprecated
+    {{0x17f1, 0x10}, hardware_type::npu3_f1},
     {{0x1B0A, 0x00}, hardware_type::npu3_B01},
-    {{0x1B0B, 0x00}, hardware_type::npu3_B02},
-    {{0x1B0C, 0x00}, hardware_type::npu3_B03},
-    {{0xb052, 0x01}, hardware_type::aie2ps}
+
+    // npu3a VF (17f3:10 / 1B0C:00)
+    {{0x17f3, 0x10}, hardware_type::npu3a_vf},
+    {{0x1B0C, 0x00}, hardware_type::npu3_B03_vf},
+
+    // npu3a PF (17f2:10 / 1B0B:00)
+    {{0x17f2, 0x10}, hardware_type::npu3a_pf},
+    {{0x1B0B, 0x00}, hardware_type::npu3_B02_pf},
+
+    // npu7
+    {{0x17f1, 0x11}, hardware_type::npu7},
+    {{0x17f2, 0x11}, hardware_type::npu7_pf},
+    {{0x17f3, 0x11}, hardware_type::npu7_vf},
+
+    // npu8
+    {{0x17f1, 0x12}, hardware_type::npu8},
+    {{0x17f2, 0x12}, hardware_type::npu8_pf},
+    {{0x17f3, 0x12}, hardware_type::npu8_vf},
+
+    // npu9
+    {{0x17f1, 0x13}, hardware_type::npu9},
+    {{0x17f2, 0x13}, hardware_type::npu9_pf},
+    {{0x17f3, 0x13}, hardware_type::npu9_vf},
+
+    // npu10
+    {{0x17f1, 0x14}, hardware_type::npu10},
+    {{0x17f2, 0x14}, hardware_type::npu10_pf},
+    {{0x17f3, 0x14}, hardware_type::npu10_vf},
+
+    // npu11
+    {{0x17f1, 0x15}, hardware_type::npu11},
+    {{0x17f2, 0x15}, hardware_type::npu11_pf},
+    {{0x17f3, 0x15}, hardware_type::npu11_vf},
+
+    {{0xb052, 0x01}, hardware_type::aie2ps},
   };
   // NOLINTEND(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
 }
 
 smi_hardware_config::hardware_type
 smi_hardware_config::
-get_hardware_type(const xq::pcie_id::data& dev) const 
+get_hardware_type(const xq::pcie_id::data& dev) const
 {
   auto it = hardware_map.find(dev);
-  return (it != hardware_map.end()) 
-      ? it->second 
-      : hardware_type::unknown;
+  return (it != hardware_map.end())
+    ? it->second
+    : hardware_type::unknown;
+}
+
+smi_hardware_config::hardware_type
+smi_hardware_config::
+get_hardware_type(const std::string& devid_str) const
+{
+  // Part-name prefix -> hardware_type, matched as a prefix of devid_str
+  // (e.g. "xc2ve3858" for T50/npu12 -> aie2ps). Kept local so the exported
+  // smi_hardware_config layout stays ABI-stable across the xrt/xdna boundary.
+  static const std::map<std::string, hardware_type> name_prefix_map = {
+    {"xc2ve", hardware_type::aie2ps}, // VE2 parts (e.g. xc2ve3858 for T50/npu12)
+  };
+  for (const auto& [prefix, hw] : name_prefix_map) {
+    if (devid_str.rfind(prefix, 0) == 0)
+      return hw;
+  }
+  return hardware_type::unknown;
+}
+
+smi_hardware_config::hardware_type
+smi_hardware_config::
+get_hardware_type(const xrt_core::device* dev) const
+{
+  if (!dev)
+    return hardware_type::unknown;
+
+  try {
+    const auto name = xrt_core::device_query_default<xq::device_id_str>(dev, std::string{});
+    if (!name.empty()) {
+      auto hw = get_hardware_type(name);
+      if (hw != hardware_type::unknown)
+        return hw;
+    }
+  }
+  catch (...) {
+  }
+
+  try {
+    const auto pcie_id = xrt_core::device_query<xq::pcie_id>(dev);
+    return get_hardware_type(pcie_id);
+  }
+  catch (...) {
+  }
+
+  return hardware_type::unknown;
 }
 
 smi_hardware_config::hardware_family
@@ -210,20 +289,26 @@ get_family(hardware_type hw)
     return hardware_family::strix;
   case hardware_type::npu3_f0:
   case hardware_type::npu3_f1:
-  case hardware_type::npu3_f2:
-  case hardware_type::npu3_f3:
-  case hardware_type::npu3_f4:
-  case hardware_type::npu3_f5:
-  case hardware_type::npu3_f6:
-  case hardware_type::npu3_f7:
-  case hardware_type::npu3_f8:
-  case hardware_type::npu3_f9:
-  case hardware_type::npu3_f10:
-  case hardware_type::npu3_f11:
-  case hardware_type::npu3_f12:
   case hardware_type::npu3_B01:
-  case hardware_type::npu3_B02:
-  case hardware_type::npu3_B03:
+  case hardware_type::npu3a_pf:
+  case hardware_type::npu3a_vf:
+  case hardware_type::npu3_B02_pf:
+  case hardware_type::npu3_B03_vf:
+  case hardware_type::npu7:
+  case hardware_type::npu7_pf:
+  case hardware_type::npu7_vf:
+  case hardware_type::npu8:
+  case hardware_type::npu8_pf:
+  case hardware_type::npu8_vf:
+  case hardware_type::npu9:
+  case hardware_type::npu9_pf:
+  case hardware_type::npu9_vf:
+  case hardware_type::npu10:
+  case hardware_type::npu10_pf:
+  case hardware_type::npu10_vf:
+  case hardware_type::npu11:
+  case hardware_type::npu11_pf:
+  case hardware_type::npu11_vf:
     return hardware_family::npu3;
   case hardware_type::aie2ps:
     return hardware_family::aie2ps;
@@ -251,6 +336,32 @@ get_aie_architecture_version(hardware_type hw)
   }
 }
 
+smi_hardware_config::npu3_variant
+smi_hardware_config::
+get_npu3_variant(hardware_type hw)
+{
+  switch (hw) {
+  case hardware_type::npu3a_vf:
+  case hardware_type::npu3_B03_vf:
+  case hardware_type::npu7_vf:
+  case hardware_type::npu8_vf:
+  case hardware_type::npu9_vf:
+  case hardware_type::npu10_vf:
+  case hardware_type::npu11_vf:
+    return npu3_variant::vf;
+  case hardware_type::npu3a_pf:
+  case hardware_type::npu3_B02_pf:
+  case hardware_type::npu7_pf:
+  case hardware_type::npu8_pf:
+  case hardware_type::npu9_pf:
+  case hardware_type::npu10_pf:
+  case hardware_type::npu11_pf:
+    return npu3_variant::pf;
+  default:
+    return npu3_variant::classic;
+  }
+}
+
 bool
 smi_hardware_config::
 is_aie2_platform(hardware_type hw)
@@ -258,6 +369,7 @@ is_aie2_platform(hardware_type hw)
   switch (get_family(hw)) {
   case hardware_family::phoenix:
   case hardware_family::strix:
+  case hardware_family::aie2ps:
     return true;
   case hardware_family::npu3:
     return false;
@@ -277,6 +389,8 @@ get_validate_archive_path(hardware_type hw)
     return "Runner/xrt_smi_strx.a";
   case hardware_family::npu3:
     return "Runner/xrt_smi_npu3.a";
+  case hardware_family::aie2ps:
+    return "Runner/xrt_smi_ve2.a";
   default:
     throw std::runtime_error("Unsupported hardware type");
   }

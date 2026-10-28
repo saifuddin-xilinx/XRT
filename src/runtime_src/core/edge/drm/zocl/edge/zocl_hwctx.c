@@ -6,6 +6,7 @@
 #include "zocl_util.h"
 #include "zocl_hwctx.h"
 #include "zocl_aie.h"
+#include "zocl_xclbin.h"
 #include <drm/drm_print.h>
 
 int zocl_create_hw_ctx(struct drm_zocl_dev *zdev, struct drm_zocl_create_hw_ctx *drm_hw_ctx, struct drm_file *filp, int slot_id)
@@ -82,10 +83,15 @@ int zocl_destroy_hw_ctx(struct drm_zocl_dev *zdev, struct drm_zocl_destroy_hw_ct
     s_id = kds_hw_ctx->slot_idx;
     ret = kds_free_hw_ctx(client, kds_hw_ctx);
     if (--slot->hwctx_ref_cnt == 0) {
-        if (s_id != 0)
-            zocl_destroy_aie(slot);
+        /*
+         * Drop this slot's AIE state. zocl_destroy_aie releases the
+         * partition unless libdfx owns it. libdfx's overlay rmdir runs
+         * after this ioctl and is that partition's aie_part_remove.
+         */
+        zocl_destroy_aie(slot);
         zdev->slot_mask &= ~(1 << s_id);
         DRM_DEBUG("Released the slot %d", s_id);
+        zocl_slot_remove_xclbin_overlay(zdev, slot);
     }
 
 error_out:

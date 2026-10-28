@@ -25,6 +25,7 @@
 #include <linux/version.h>
 #include <linux/printk.h>
 #include <linux/vmalloc.h>
+#include <linux/of.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/dma-buf.h>
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
@@ -33,6 +34,7 @@
 #include <drm/drm_gem_cma_helper.h>
 #endif
 #include <linux/poll.h>
+#include <linux/sched.h>
 #include "zocl_util.h"
 #include "zocl_ioctl.h"
 #include "zocl_ert.h"
@@ -348,6 +350,11 @@ int zocl_command_ioctl(struct drm_zocl_dev *zdev, void *data,
 int zocl_context_ioctl(struct drm_zocl_dev *zdev, void *data,
 		       struct drm_file *filp);
 struct platform_device *zocl_find_pdev(char *name);
+void zocl_cu_intc_refresh(struct drm_zocl_dev *zdev);
+void zocl_cu_irq_update(struct drm_zocl_dev *zdev);
+int zert_cu_intc_refresh(void);
+void zert_cu_intc_fini(void);
+int zocl_of_parse_cu_irqs(struct device_node *np, u32 *virqs, u32 *hw_ids, int max);
 
 static inline struct drm_zocl_dev *
 zocl_get_zdev(void)

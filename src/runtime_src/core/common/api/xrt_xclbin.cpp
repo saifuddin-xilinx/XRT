@@ -8,11 +8,11 @@
 #define XRT_CORE_COMMON_SOURCE // in same dll as core_common
 #include "core/include/xrt/experimental/xrt_xclbin.h"
 
-#include "core/common/system.h"
 #include "core/common/device.h"
 #include "core/common/message.h"
 #include "core/common/module_loader.h"
 #include "core/common/query_requests.h"
+#include "core/common/system.h"
 #include "core/common/xclbin_parser.h"
 #include "core/common/xclbin_swemu.h"
 
@@ -234,25 +234,34 @@ public: // purposely not a struct to match decl in xrt_xclbin.h
   void
   add_mem_at_idx(int32_t argidx, const xclbin::mem& mem)
   {
-    resize_args(argidx + 1);
+    // cast before +1 to avoid signed overflow when argidx == INT32_MAX
+    resize_args(static_cast<size_t>(argidx) + 1);
     if (!m_args[argidx])
       m_args[argidx] = xclbin::arg{std::make_shared<arg_impl>()};
     m_args[argidx].get_handle()->add_mem(mem);
   }
 
 public:
-  ip_impl(const ::connectivity* conn,
+  ip_impl(const ::connectivity* conn, size_t conn_size,
           const std::vector<xclbin::mem>& mems,
           const ::ip_data* ip, int32_t ipidx)
     : m_ip(ip), m_ip_layout_idx(ipidx)
   {
-    if (!conn)
+    // m_count (int32_t) is the only non-array member, so sizeof(int32_t)
+    // is the minimum section size needed to read from struct connectivity
+    if (!conn || conn_size < sizeof(int32_t) || conn->m_count < 0)
       return;
 
-    for (int32_t idx = 0; idx < conn->m_count; ++idx) {
+    auto max_count = (conn_size - sizeof(int32_t)) / sizeof(::connection);
+    auto count = std::min(static_cast<size_t>(conn->m_count), max_count);
+    for (int32_t idx = 0; idx < static_cast<int32_t>(count); ++idx) {
         auto& cxn = conn->m_connection[idx];
         if (cxn.m_ip_layout_index != m_ip_layout_idx)
           continue;
+
+        if (cxn.arg_index < 0 || cxn.mem_data_index < 0 ||
+            static_cast<size_t>(cxn.mem_data_index) >= mems.size())
+          throw std::runtime_error("xclbin: invalid connectivity index");
 
         add_mem_at_idx(cxn.arg_index, mems.at(cxn.mem_data_index));
     }
@@ -412,12 +421,23 @@ class xclbin_impl
     init_mems(const xclbin_impl* ximpl)
     {
       std::vector<xclbin::mem> mems;
-      if (auto mem_topology = ximpl->get_section<const ::mem_topology*>(ASK_GROUP_TOPOLOGY)) {
-        mems.reserve(mem_topology->m_count);
-        for (int32_t idx = 0; idx < mem_topology->m_count; ++idx) {
-          auto mem = mem_topology->m_mem_data + idx;
-          mems.emplace_back(std::make_shared<xclbin::mem_impl>(mem, idx));
-        }
+      auto [data, size] = ximpl->get_axlf_section(ASK_GROUP_TOPOLOGY);
+      // m_count is the only non-array member, so sizeof(int32_t) is both the
+      // minimum section size needed to read from struct mem_topology and also
+      // the byte offset to m_mem_data.
+      if (!data || size < sizeof(int32_t))
+        return mems;
+
+      auto mem_topology = reinterpret_cast<const ::mem_topology*>(data);
+      if (mem_topology->m_count < 0)
+        return mems;
+
+      auto max_count = (size - sizeof(int32_t)) / sizeof(::mem_data);
+      auto count = std::min(static_cast<size_t>(mem_topology->m_count), max_count);
+      mems.reserve(count);
+      for (int32_t idx = 0; idx < static_cast<int32_t>(count); ++idx) {
+        auto mem = mem_topology->m_mem_data + idx;
+        mems.emplace_back(std::make_shared<xclbin::mem_impl>(mem, idx));
       }
       return mems;
     }
@@ -462,18 +482,29 @@ class xclbin_impl
     static std::vector<xclbin::ip>
     init_ips(const xclbin_impl* ximpl, const std::vector<xclbin::mem>& mems)
     {
-      auto ip_layout = ximpl->get_section<const ::ip_layout*>(IP_LAYOUT);
-      if (!ip_layout)
+      auto [ip_data, ip_size] = ximpl->get_axlf_section(IP_LAYOUT);
+      // m_count is the only non-array member, so sizeof(int32_t) is both the
+      // minimum section size needed to read from struct ip_layout and also
+      // the byte offset to m_ip_data.
+      if (!ip_data || ip_size < sizeof(int32_t))
         return {};
 
-      auto conn = ximpl->get_section<const ::connectivity*>(ASK_GROUP_CONNECTIVITY);
+      auto ip_layout = reinterpret_cast<const ::ip_layout*>(ip_data);
+      if (ip_layout->m_count < 0)
+        return {};
+
+      auto max_count = (ip_size - sizeof(int32_t)) / sizeof(::ip_data);
+      auto count = std::min(static_cast<size_t>(ip_layout->m_count), max_count);
+
+      auto [conn_data, conn_size] = ximpl->get_axlf_section(ASK_GROUP_CONNECTIVITY);
+      auto conn = reinterpret_cast<const ::connectivity*>(conn_data);
 
       std::vector<xclbin::ip> ips;
-      ips.reserve(ip_layout->m_count);
-      for (int32_t idx = 0; idx < ip_layout->m_count; ++idx)
+      ips.reserve(count);
+      for (int32_t idx = 0; idx < static_cast<int32_t>(count); ++idx)
         ips.emplace_back
           (std::make_shared<xclbin::ip_impl>
-           (conn, mems, ip_layout->m_ip_data + idx, idx));
+           (conn, conn_size, mems, ip_layout->m_ip_data + idx, idx));
 
       return ips;
     }
@@ -852,13 +883,14 @@ class xclbin_full : public xclbin_impl
     if (m_axlf.size() < sizeof(axlf))
       throw std::runtime_error("xclbin: buffer too small to contain header");
 
-    const axlf* tmp = reinterpret_cast<const axlf*>(m_axlf.data());
+    auto tmp = reinterpret_cast<const axlf*>(m_axlf.data());
     if (strncmp(tmp->m_magic, "xclbin2", strlen("xclbin2")) != 0) // Future: Do not hardcode "xclbin2"
       throw std::runtime_error("Invalid xclbin");
 
-    // m_length must match the actual buffer size we loaded
-    if (tmp->m_header.m_length != m_axlf.size())
-      throw std::runtime_error("xclbin: m_length does not match buffer size");
+    // Strict equality check would be best here, but accept legacy
+    // xclbins where m_length does not match the actual file size
+    if (m_axlf.size() < tmp->m_header.m_length)
+      throw std::runtime_error("xclbin declared length is greater than buffer size");
 
     // Ensure the section header array fits within the buffer before iterating
     static const uint64_t max_sections_allowed = 10000;
