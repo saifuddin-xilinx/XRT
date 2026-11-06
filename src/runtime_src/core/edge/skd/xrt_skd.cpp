@@ -26,9 +26,8 @@ using clockc = std::chrono::high_resolution_clock;
 
 namespace {
 
-// kname comes from the xclbin's SOFT_KERNEL section mpo_name/mpo_symbol_name
-// field, fully attacker-controlled by whoever authored the xclbin.  Reject it
-// if it would let m_sk_path escape SOFT_KERNEL_FILE_PATH (SWSPLAT-39839, CWE-22).
+// Reject names that would let the resolved soft-kernel path escape
+// SOFT_KERNEL_FILE_PATH.
 bool
 sk_name_is_safe(const std::string& kname)
 {
